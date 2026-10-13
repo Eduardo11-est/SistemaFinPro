@@ -1,0 +1,364 @@
+// Schema Prisma para Sistema Integrado de Controle Financeiro (Pessoal e Corporativo)
+// Configurado para Neon PostgreSQL Serverless
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum WorkspaceType {
+  PERSONAL
+  CORPORATE
+}
+
+enum AccountType {
+  CHECKING       // Conta Corrente
+  SAVINGS        // Poupança
+  CREDIT_CARD    // Cartão de Crédito
+  CASH           // Carteira Física
+  INVESTMENT     // Investimentos
+  GATEWAY        // Gateway de Pagamento (Stripe, Mercado Pago, Asaas)
+}
+
+enum CurrencyType {
+  BRL
+  USD
+  EUR
+}
+
+enum TransactionType {
+  INCOME         // Receita
+  EXPENSE        // Despesa
+  TRANSFER       // Transferência
+}
+
+enum TransactionStatus {
+  COMPLETED
+  PENDING
+  CANCELLED
+}
+
+enum RecurrenceFrequency {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum PayableReceivableType {
+  PAYABLE        // Conta a Pagar
+  RECEIVABLE     // Conta a Receber
+}
+
+enum SettlementStatus {
+  PENDING        // Pendente
+  PAID           // Pago / Liquidado
+  OVERDUE        // Atrasado
+  CANCELLED      // Cancelado
+  SCHEDULED      // Agendado
+}
+
+enum CategoryType {
+  INCOME
+  EXPENSE
+}
+
+model User {
+  id            String            @id @default(uuid())
+  name          String
+  email         String            @unique
+  avatarUrl     String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  memberships   WorkspaceMember[]
+  auditLogs     AuditLog[]
+}
+
+model Workspace {
+  id                  String               @id @default(uuid())
+  name                String
+  type                WorkspaceType        @default(PERSONAL)
+  document            String?              // CPF (pessoal) ou CNPJ (corporativo)
+  legalName           String?              // Razão Social
+  defaultCurrency     CurrencyType         @default(BRL)
+  colorTheme          String?              @default("#10b981")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  members             WorkspaceMember[]
+  accounts            Account[]
+  categories          Category[]
+  costCenters         CostCenter[]
+  transactions        Transaction[]
+  payablesReceivables PayableReceivable[]
+  budgets             Budget[]
+  goals               Goal[]
+  reconciliationRules ReconciliationRule[]
+  bankStatements      BankStatement[]
+  auditLogs           AuditLog[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  role        String    @default("OWNER") // OWNER, ADMIN, MEMBER, VIEWER
+  userId      String
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, workspaceId])
+}
+
+model Account {
+  id                  String               @id @default(uuid())
+  name                String
+  type                AccountType          @default(CHECKING)
+  bankName            String?
+  currency            CurrencyType         @default(BRL)
+  initialBalance      Float                @default(0.0)
+  currentBalance      Float                @default(0.0)
+  creditLimit         Float?               // Para cartão de crédito
+  closingDay          Int?                 // Dia de fechamento da fatura
+  dueDay              Int?                 // Dia de vencimento da fatura
+  color               String?              @default("#3b82f6")
+  workspaceId         String
+  workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  transactions        Transaction[]        @relation("AccountTransactions")
+  targetTransfers     Transaction[]        @relation("TargetAccountTransfers")
+  payablesReceivables PayableReceivable[]
+  bankStatements      BankStatement[]
+
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model Category {
+  id                  String               @id @default(uuid())
+  name                String
+  type                CategoryType         @default(EXPENSE)
+  icon                String?              @default("Tag")
+  color               String?              @default("#64748b")
+  isSystem            Boolean              @default(false)
+  workspaceId         String
+  workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  subcategories       Subcategory[]
+  transactions        Transaction[]
+  payablesReceivables PayableReceivable[]
+  budgets             Budget[]
+
+  createdAt           DateTime             @default(now())
+}
+
+model Subcategory {
+  id           String        @id @default(uuid())
+  name         String
+  categoryId   String
+  category     Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+}
+
+model CostCenter {
+  id           String        @id @default(uuid())
+  code         String?
+  name         String
+  description  String?
+  budgetLimit  Float?
+  workspaceId  String
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+}
+
+model Transaction {
+  id                   String              @id @default(uuid())
+  type                 TransactionType
+  description          String
+  amount               Float
+  date                 DateTime            @default(now())
+  status               TransactionStatus   @default(COMPLETED)
+  paymentMethod        String?
+  currency             CurrencyType        @default(BRL)
+  exchangeRate         Float               @default(1.0)
+  notes                String?
+  tags                 String[]            @default([])
+
+  // Parcelamento
+  isInstallment        Boolean             @default(false)
+  installmentNumber    Int?
+  totalInstallments    Int?
+  installmentGroupId   String?
+
+  // Recorrência
+  isRecurring          Boolean             @default(false)
+  recurrenceFrequency  RecurrenceFrequency @default(NONE)
+
+  // Vínculo entre contextos (Ex: Pró-labore PJ -> Salário PF)
+  linkedTransactionId  String?
+
+  workspaceId          String
+  workspace            Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  accountId            String
+  account              Account             @relation("AccountTransactions", fields: [accountId], references: [id], onDelete: Cascade)
+
+  targetAccountId      String?
+  targetAccount        Account?            @relation("TargetAccountTransfers", fields: [targetAccountId], references: [id])
+
+  categoryId           String?
+  category             Category?           @relation(fields: [categoryId], references: [id])
+
+  subcategoryId        String?
+  subcategory          Subcategory?        @relation(fields: [subcategoryId], references: [id])
+
+  costCenterId         String?
+  costCenter           CostCenter?         @relation(fields: [costCenterId], references: [id])
+
+  attachments          Attachment[]
+  bankStatementItems   BankStatementItem[]
+
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+}
+
+model PayableReceivable {
+  id                  String                @id @default(uuid())
+  type                PayableReceivableType
+  description         String
+  amount              Float
+  dueDate             DateTime
+  paymentDate         DateTime?
+  status              SettlementStatus      @default(PENDING)
+  recipientOrPayer    String?               // Fornecedor / Cliente
+  notes               String?
+
+  // Juros e Multas
+  penaltyRate         Float                 @default(0.0) // Multa em %
+  interestRateDaily   Float                 @default(0.0) // Juros diários em %
+  accruedInterest     Float                 @default(0.0) // Valor calculado em atraso
+  finalAmount         Float?                // Montante liquidado com juros/descontos
+
+  workspaceId         String
+  workspace           Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  accountId           String?
+  account             Account?              @relation(fields: [accountId], references: [id])
+
+  categoryId          String?
+  category            Category?             @relation(fields: [categoryId], references: [id])
+
+  attachments         Attachment[]
+
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+}
+
+model Budget {
+  id           String    @id @default(uuid())
+  monthlyLimit Float
+  period       String    // Formato "YYYY-MM"
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  categoryId   String
+  category     Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([workspaceId, categoryId, period])
+}
+
+model Goal {
+  id            String    @id @default(uuid())
+  title         String
+  targetAmount  Float
+  currentAmount Float     @default(0.0)
+  targetDate    DateTime?
+  color         String?   @default("#10b981")
+  icon          String?   @default("Target")
+  category      String?
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model BankStatement {
+  id          String              @id @default(uuid())
+  filename    String
+  fileFormat  String              // OFX, CSV, PDF
+  importedAt  DateTime            @default(now())
+  accountId   String
+  account     Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  items       BankStatementItem[]
+}
+
+model BankStatementItem {
+  id                  String        @id @default(uuid())
+  statementId         String
+  statement           BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  date                DateTime
+  description         String
+  amount              Float
+  fitId               String?       // ID do banco (OFX)
+  isReconciled        Boolean       @default(false)
+
+  matchedTransactionId String?
+  matchedTransaction  Transaction?  @relation(fields: [matchedTransactionId], references: [id])
+
+  createdAt           DateTime      @default(now())
+}
+
+model ReconciliationRule {
+  id          String    @id @default(uuid())
+  keyword     String    // Ex: "UBER", "AWS", "POSTO"
+  targetType  TransactionType
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+}
+
+model Attachment {
+  id                  String             @id @default(uuid())
+  filename            String
+  fileSize            Int
+  mimeType            String
+  url                 String
+  createdAt           DateTime           @default(now())
+
+  transactionId       String?
+  transaction         Transaction?       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  payableReceivableId String?
+  payableReceivable   PayableReceivable? @relation(fields: [payableReceivableId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id          String    @id @default(uuid())
+  action      String    // CREATE, UPDATE, DELETE, RECONCILE, EXPORT
+  entity      String    // Transaction, Account, Budget, etc.
+  details     String?
+  timestamp   DateTime  @default(now())
+
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}

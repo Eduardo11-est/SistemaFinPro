@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: finpro-sistema-financeiro
+    env: node
+    plan: free
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_APP_NAME
+        value: "FinPro - Controle Financeiro Unificado"
+      - key: NEXT_PUBLIC_DEFAULT_CURRENCY
+        value: "BRL"
