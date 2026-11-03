@@ -3,54 +3,57 @@
 import React, { useMemo, useState } from 'react';
 import { useFinance } from '@/lib/store';
 import {
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   ResponsiveContainer,
+  Bar,
   Line,
   ComposedChart
 } from 'recharts';
-import { ArrowUpRight, TrendingUp } from 'lucide-react';
+import { TrendingUp } from 'lucide-react';
 
 export function CashFlowChart() {
   const { transactions, formatMoney, activeCurrency, convertAmount } = useFinance();
   const [period, setPeriod] = useState<'6M' | '30D'>('6M');
 
-  // Generate 6 months data aggregation
+  // Generate 6 months data aggregation from real transactions
   const chartData = useMemo(() => {
-    const months = ['Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out'];
-    
-    // Initial baseline data for realistic curve
-    const baseline = [
-      { name: 'Mai', receitas: 32000, despesas: 21500, saldo: 10500 },
-      { name: 'Jun', receitas: 38400, despesas: 24800, saldo: 13600 },
-      { name: 'Jul', receitas: 41200, despesas: 29000, saldo: 12200 },
-      { name: 'Ago', receitas: 47900, despesas: 31200, saldo: 16700 },
-      { name: 'Set', receitas: 52100, despesas: 34500, saldo: 17600 },
-      { name: 'Out (Atual)', receitas: 0, despesas: 0, saldo: 0 },
-    ];
+    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const now = new Date();
+    const result = [];
 
-    // Calculate actual current month (Out) from current transactions
-    let outIncome = 0;
-    let outExpense = 0;
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const label = i === 0 ? `${monthNames[month]} (Atual)` : monthNames[month];
 
-    transactions.forEach((tx) => {
-      if (tx.status === 'COMPLETED') {
-        const val = convertAmount(tx.amount, tx.currency, activeCurrency);
-        if (tx.type === 'INCOME') outIncome += val;
-        if (tx.type === 'EXPENSE') outExpense += val;
-      }
-    });
+      let receitas = 0;
+      let despesas = 0;
 
-    baseline[5].receitas = Math.round(outIncome);
-    baseline[5].despesas = Math.round(outExpense);
-    baseline[5].saldo = Math.round(outIncome - outExpense);
+      transactions.forEach((tx) => {
+        if (tx.status === 'COMPLETED') {
+          const txDate = new Date(tx.date);
+          if (txDate.getFullYear() === year && txDate.getMonth() === month) {
+            const val = convertAmount(tx.amount, tx.currency, activeCurrency);
+            if (tx.type === 'INCOME') receitas += val;
+            if (tx.type === 'EXPENSE') despesas += val;
+          }
+        }
+      });
 
-    return baseline;
+      result.push({
+        name: label,
+        receitas: Math.round(receitas),
+        despesas: Math.round(despesas),
+        saldo: Math.round(receitas - despesas),
+      });
+    }
+
+    return result;
   }, [transactions, convertAmount, activeCurrency]);
 
   return (

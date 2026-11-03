@@ -209,9 +209,9 @@ export function PayablesReceivablesView() {
 
                       {/* Juros & Multa Calculados */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        {item.accruedInterest > 0 ? (
+                        {(item.accruedInterest || 0) > 0 ? (
                           <span className="text-rose-600 dark:text-rose-400 font-mono text-[11px] font-semibold">
-                            +{formatMoney(item.accruedInterest)} ({item.penaltyRate}% + juros)
+                            +{formatMoney(item.accruedInterest || 0)} ({item.penaltyRate}% + juros)
                           </span>
                         ) : (
                           <span className="text-slate-400 text-[11px]">-</span>

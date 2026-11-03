@@ -77,7 +77,7 @@ export function UpcomingBillsCard() {
                       {isOverdue && (
                         <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-0.5">
                           <AlertCircle className="w-3 h-3" />
-                          Atrasado (+{formatMoney(bill.accruedInterest)} juros)
+                          Atrasado (+{formatMoney(bill.accruedInterest || 0)} juros)
                         </span>
                       )}
                     </div>

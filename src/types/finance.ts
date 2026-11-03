@@ -18,6 +18,13 @@ export type SettlementStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED' | 'S
 
 export type RecurrenceFrequency = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl?: string | null;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -69,21 +76,12 @@ export interface CostCenter {
   workspaceId: string;
 }
 
-export interface Attachment {
-  id: string;
-  filename: string;
-  fileSize: number;
-  mimeType: string;
-  url: string;
-  createdAt: string;
-}
-
 export interface Transaction {
   id: string;
   type: TransactionType;
   description: string;
   amount: number;
-  date: string; // ISO date string YYYY-MM-DD
+  date: string;
   status: TransactionStatus;
   paymentMethod?: string;
   currency: CurrencyType;
@@ -101,17 +99,18 @@ export interface Transaction {
   isRecurring?: boolean;
   recurrenceFrequency?: RecurrenceFrequency;
 
-  // Inter-contextos (Pró-labore, distribuição de lucros, aporte)
+  // Vínculos Inter-Contexto (PJ -> PF)
   linkedTransactionId?: string;
   linkedWorkspaceId?: string;
 
+  // Relacionamentos
   workspaceId: string;
   accountId: string;
-  targetAccountId?: string;
+  targetAccountId?: string; // Para transferências
   categoryId?: string;
   subcategoryId?: string;
   costCenterId?: string;
-  attachments?: Attachment[];
+  attachments?: string[];
 }
 
 export interface PayableReceivable {
@@ -119,16 +118,15 @@ export interface PayableReceivable {
   type: 'PAYABLE' | 'RECEIVABLE';
   description: string;
   amount: number;
-  dueDate: string; // YYYY-MM-DD
+  dueDate: string;
   paymentDate?: string;
   status: SettlementStatus;
   recipientOrPayer?: string;
   notes?: string;
   
-  // Juros e multas por atraso
-  penaltyRate: number; // % (ex: 2%)
-  interestRateDaily: number; // % ao dia (ex: 0.033%)
-  accruedInterest: number; // Valor calculado adicional
+  penaltyRate?: number; // %
+  interestRateDaily?: number; // % ao dia
+  accruedInterest?: number; // Valor calculado em atraso
   finalAmount?: number;
 
   workspaceId: string;
@@ -138,11 +136,11 @@ export interface PayableReceivable {
 
 export interface Budget {
   id: string;
-  categoryId: string;
   monthlyLimit: number;
   currentSpent: number;
   period: string; // "YYYY-MM"
   workspaceId: string;
+  categoryId: string;
 }
 
 export interface Goal {

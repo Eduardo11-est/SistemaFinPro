@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import {
+  AuthUser,
   Workspace,
   Account,
   Category,
@@ -29,6 +30,13 @@ import {
 } from './mock-data';
 
 interface FinanceContextType {
+  // Auth
+  currentUser: AuthUser | null;
+  isAuthLoading: boolean;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (name: string, email: string, password: string, workspaceName?: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => void;
+
   // Workspaces
   workspaces: Workspace[];
   currentWorkspaceId: string;
@@ -102,11 +110,15 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-const STORAGE_KEY_PREFIX = 'finpro_store_v1_';
+const STORAGE_KEY_PREFIX = 'finpro_store_v2_';
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
   // Theme
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
 
   // Workspaces
   const [workspaces, setWorkspaces] = useState<Workspace[]>(INITIAL_WORKSPACES);
@@ -123,7 +135,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [activeView, setActiveView] = useState<string>('dashboard');
   const [currentMonthPrefix, setCurrentMonthPrefix] = useState<string>('2026-10');
 
-  // Data states
+  // Data states (iniciam completamente limpos)
   const [accounts, setAccounts] = useState<Account[]>(INITIAL_ACCOUNTS);
   const [categories, setCategories] = useState<Category[]>(INITIAL_CATEGORIES);
   const [costCenters, setCostCenters] = useState<CostCenter[]>(INITIAL_COST_CENTERS);
@@ -136,6 +148,48 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Modal
   const [isNewTransactionModalOpen, setIsNewTransactionModalOpen] = useState(false);
+
+  // Sincronização com o Neon PostgreSQL
+  const loadFromNeon = useCallback(async (userId?: string) => {
+    try {
+      const userParam = userId ? `?userId=${userId}` : '';
+      const [wsRes, accRes, txRes, payRes] = await Promise.all([
+        fetch(`/api/workspaces${userParam}`).then((r) => (r.ok ? r.json() : null)),
+        fetch('/api/accounts').then((r) => (r.ok ? r.json() : null)),
+        fetch('/api/transactions').then((r) => (r.ok ? r.json() : null)),
+        fetch('/api/payables').then((r) => (r.ok ? r.json() : null)),
+      ]);
+
+      if (wsRes && Array.isArray(wsRes) && wsRes.length > 0) {
+        setWorkspaces(wsRes);
+        if (!wsRes.some((w: any) => w.id === currentWorkspaceId)) {
+          setCurrentWorkspaceId(wsRes[0].id);
+          try { localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, wsRes[0].id); } catch {}
+        }
+      }
+      if (accRes && Array.isArray(accRes)) {
+        setAccounts(accRes);
+        try { localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(accRes)); } catch {}
+      }
+      if (txRes && Array.isArray(txRes)) {
+        const mappedTx = txRes.map((t: any) => ({
+          ...t,
+          date: typeof t.date === 'string' ? t.date.split('T')[0] : t.date,
+        }));
+        setTransactions(mappedTx);
+        try { localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(mappedTx)); } catch {}
+      }
+      if (payRes && Array.isArray(payRes)) {
+        const mappedPay = payRes.map((p: any) => ({
+          ...p,
+          dueDate: typeof p.dueDate === 'string' ? p.dueDate.split('T')[0] : p.dueDate,
+        }));
+        setPayablesReceivables(mappedPay);
+      }
+    } catch (err) {
+      console.info('Carregando base local:', err);
+    }
+  }, [currentWorkspaceId]);
 
   // Load persisted state from localStorage if available
   useEffect(() => {
@@ -152,6 +206,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         document.documentElement.classList.add('dark');
       }
 
+      const savedUserStr = localStorage.getItem(`${STORAGE_KEY_PREFIX}user`);
+      let userObj: AuthUser | null = null;
+      if (savedUserStr) {
+        try {
+          userObj = JSON.parse(savedUserStr);
+          setCurrentUser(userObj);
+        } catch {}
+      }
+
       const savedWs = localStorage.getItem(`${STORAGE_KEY_PREFIX}ws`);
       if (savedWs) setCurrentWorkspaceId(savedWs);
 
@@ -164,50 +227,91 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const now = new Date();
       setCurrentMonthPrefix(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
 
-      // Sincronização inicial com o Neon PostgreSQL
-      const loadFromNeon = async () => {
-        try {
-          const [wsRes, accRes, txRes, payRes] = await Promise.all([
-            fetch('/api/workspaces').then((r) => (r.ok ? r.json() : null)),
-            fetch('/api/accounts').then((r) => (r.ok ? r.json() : null)),
-            fetch('/api/transactions').then((r) => (r.ok ? r.json() : null)),
-            fetch('/api/payables').then((r) => (r.ok ? r.json() : null)),
-          ]);
-
-          if (wsRes && Array.isArray(wsRes) && wsRes.length > 0) {
-            setWorkspaces(wsRes);
-            if (!wsRes.some((w: any) => w.id === currentWorkspaceId)) {
-              setCurrentWorkspaceId(wsRes[0].id);
-              try { localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, wsRes[0].id); } catch {}
-            }
-          }
-          if (accRes && Array.isArray(accRes)) {
-            setAccounts(accRes);
-            try { localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(accRes)); } catch {}
-          }
-          if (txRes && Array.isArray(txRes)) {
-            const mappedTx = txRes.map((t: any) => ({
-              ...t,
-              date: typeof t.date === 'string' ? t.date.split('T')[0] : t.date,
-            }));
-            setTransactions(mappedTx);
-            try { localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(mappedTx)); } catch {}
-          }
-          if (payRes && Array.isArray(payRes)) {
-            const mappedPay = payRes.map((p: any) => ({
-              ...p,
-              dueDate: typeof p.dueDate === 'string' ? p.dueDate.split('T')[0] : p.dueDate,
-            }));
-            setPayablesReceivables(mappedPay);
-          }
-        } catch (err) {
-          console.info('Carregando base local otimizada:', err);
-        }
-      };
-      loadFromNeon();
+      if (userObj) {
+        loadFromNeon(userObj.id);
+      }
     } catch {
       // Ignora erro no SSR
+    } finally {
+      setIsAuthLoading(false);
     }
+  }, [loadFromNeon]);
+
+  // Auth Methods
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Erro ao realizar login' };
+      }
+
+      setCurrentUser(data.user);
+      try {
+        localStorage.setItem(`${STORAGE_KEY_PREFIX}user`, JSON.stringify(data.user));
+      } catch {}
+
+      if (data.workspaces && data.workspaces.length > 0) {
+        setWorkspaces(data.workspaces);
+        setCurrentWorkspaceId(data.workspaces[0].id);
+        try { localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, data.workspaces[0].id); } catch {}
+      }
+
+      await loadFromNeon(data.user.id);
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro de conexão';
+      return { success: false, error: msg };
+    }
+  }, [loadFromNeon]);
+
+  const register = useCallback(async (name: string, email: string, password: string, workspaceName?: string) => {
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, workspaceName }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Erro ao criar conta' };
+      }
+
+      setCurrentUser(data.user);
+      try {
+        localStorage.setItem(`${STORAGE_KEY_PREFIX}user`, JSON.stringify(data.user));
+      } catch {}
+
+      if (data.workspace) {
+        setWorkspaces([data.workspace]);
+        setCurrentWorkspaceId(data.workspace.id);
+        try { localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, data.workspace.id); } catch {}
+      }
+
+      await loadFromNeon(data.user.id);
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro de conexão';
+      return { success: false, error: msg };
+    }
+  }, [loadFromNeon]);
+
+  const logout = useCallback(() => {
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}user`);
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}ws`);
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}tx`);
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}acc`);
+    } catch {}
+    setTransactions([]);
+    setPayablesReceivables([]);
+    setAccounts(INITIAL_ACCOUNTS);
+    setWorkspaces(INITIAL_WORKSPACES);
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -233,7 +337,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const currentWorkspace = useMemo(() => {
-    return workspaces.find((w) => w.id === currentWorkspaceId) || workspaces[0];
+    return workspaces.find((w) => w.id === currentWorkspaceId) || workspaces[0] || INITIAL_WORKSPACES[0];
   }, [workspaces, currentWorkspaceId]);
 
   // Currency converter
@@ -344,9 +448,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     fetch('/api/workspaces', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newWs),
+      body: JSON.stringify({ ...newWs, userId: currentUser?.id }),
     }).catch(() => {});
-  }, []);
+  }, [currentUser]);
 
   // Transaction Actions with Inter-Context Awareness (Golden Rule!)
   const addTransaction = useCallback((tx: Omit<Transaction, 'id'>) => {
@@ -375,7 +479,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     // Check if this is an inter-context operation (e.g. Pró-labore withdrawal from Corporate to Personal)
     const extraTransactions: Transaction[] = [];
     if (newTx.linkedWorkspaceId && newTx.tags.includes('pro-labore')) {
-      // Find personal account to credit
       const personalAccount = accounts.find((a) => a.workspaceId === newTx.linkedWorkspaceId);
       if (personalAccount) {
         const mirrorTx: Transaction = {
@@ -397,7 +500,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         };
         extraTransactions.push(mirrorTx);
 
-        // Update personal account balance as well
         setAccounts((prev) =>
           prev.map((a) =>
             a.id === personalAccount.id ? { ...a, currentBalance: a.currentBalance + newTx.amount } : a
@@ -431,7 +533,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setTransactions((prev) => {
       const tx = prev.find((t) => t.id === id);
       if (tx) {
-        // Revert account balance
         setAccounts((accs) =>
           accs.map((acc) => {
             if (acc.id === tx.accountId) {
@@ -474,8 +575,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       return prev.map((pr) => {
         if (pr.id !== id) return pr;
 
-        // Create transaction in account
-        const finalAmt = pr.amount + pr.accruedInterest;
+        const finalAmt = pr.amount + (pr.accruedInterest || 0);
         const txType = pr.type === 'PAYABLE' ? 'EXPENSE' : 'INCOME';
 
         addTransaction({
@@ -536,7 +636,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Compute stats and KPIs
   const stats = useMemo(() => {
-    // Total balance in active workspace converted to current selected currency
     const totalBalance = currentAccounts.reduce((acc, account) => {
       const converted = convertAmount(account.currentBalance, account.currency, activeCurrency);
       return acc + converted;
@@ -555,7 +654,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
     const monthNet = monthIncome - monthExpense;
 
-    // Pending Payables & Receivables
     let pendingPayables = 0;
     let pendingReceivables = 0;
     let overdueCount = 0;
@@ -575,13 +673,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const projectedBalance = totalBalance + pendingReceivables - pendingPayables;
     const hasCashDeficitAlert = projectedBalance < 0;
 
-    // Budget alerts (>80% or >100%)
     let budgetAlertsCount = 0;
-    currentBudgets.forEach((b) => {
-      if (b.currentSpent >= b.monthlyLimit * 0.8) {
-        budgetAlertsCount++;
-      }
-    });
 
     return {
       totalBalance,
@@ -593,11 +685,17 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       overduePayablesCount: overdueCount,
       budgetAlertsCount,
     };
-  }, [currentAccounts, currentTransactions, currentPayablesReceivables, currentBudgets, convertAmount, activeCurrency]);
+  }, [currentAccounts, currentTransactions, currentPayablesReceivables, currentMonthPrefix, convertAmount, activeCurrency]);
 
   return (
     <FinanceContext.Provider
       value={{
+        currentUser,
+        isAuthLoading,
+        login,
+        register,
+        logout,
+
         workspaces,
         currentWorkspaceId,
         currentWorkspace,

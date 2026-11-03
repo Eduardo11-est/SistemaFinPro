@@ -2,6 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { useFinance } from '@/lib/store';
+import { AuthScreen } from '@/components/auth/AuthScreen';
 import { Navbar } from '@/components/layout/Navbar';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { KpiCards } from '@/components/dashboard/KpiCards';
@@ -23,20 +24,22 @@ import {
   ArrowLeftRight,
   Wallet,
   CalendarDays,
-  FileCheck2,
-  PieChart,
   BarChart3,
-  Database,
   Plus
 } from 'lucide-react';
 
 export default function HomePage() {
-  const { activeView, setActiveView, setIsNewTransactionModalOpen } = useFinance();
+  const {
+    activeView,
+    setActiveView,
+    setIsNewTransactionModalOpen,
+    currentUser,
+    isAuthLoading
+  } = useFinance();
 
   // Keyboard shortcut: Press 'N' or 'n' to open transaction modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input or textarea
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
         return;
       }
@@ -49,6 +52,23 @@ export default function HomePage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setIsNewTransactionModalOpen]);
+
+  // Se estiver carregando sessão
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-9 h-9 border-3 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+          <span className="text-xs text-slate-400 font-medium">Carregando ambiente seguro...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Se não estiver logado, exibe a tela de login/cadastro
+  if (!currentUser) {
+    return <AuthScreen />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
@@ -98,7 +118,7 @@ export default function HomePage() {
       </div>
 
       {/* Barra de Navegação Rápida no Mobile */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 flex items-center justify-around text-[10px]">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 px-4 py-2 flex items-center justify-around text-[10px]">
         <button
           onClick={() => setActiveView('dashboard')}
           className={`flex flex-col items-center gap-0.5 p-1 ${

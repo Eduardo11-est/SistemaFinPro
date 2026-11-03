@@ -1,9 +1,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    const where = userId
+      ? { members: { some: { userId } } }
+      : {};
+
     const workspaces = await prisma.workspace.findMany({
+      where,
       include: {
         accounts: true,
       },
@@ -27,6 +35,16 @@ export async function POST(req: Request) {
         legalName: body.legalName,
         defaultCurrency: body.defaultCurrency || 'BRL',
         colorTheme: body.colorTheme || '#6366f1',
+        ...(body.userId
+          ? {
+              members: {
+                create: {
+                  userId: body.userId,
+                  role: 'OWNER',
+                },
+              },
+            }
+          : {}),
       },
     });
     return NextResponse.json(workspace);
