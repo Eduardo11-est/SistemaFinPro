@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
+    "db:clean": "node scripts/clean-database.mjs",
     "db:studio": "prisma studio"
   },
   "dependencies": {

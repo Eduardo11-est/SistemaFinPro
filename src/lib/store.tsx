@@ -176,25 +176,29 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
           if (wsRes && Array.isArray(wsRes) && wsRes.length > 0) {
             setWorkspaces(wsRes);
+            if (!wsRes.some((w: any) => w.id === currentWorkspaceId)) {
+              setCurrentWorkspaceId(wsRes[0].id);
+              try { localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, wsRes[0].id); } catch {}
+            }
           }
-          if (accRes && Array.isArray(accRes) && accRes.length > 0) {
+          if (accRes && Array.isArray(accRes)) {
             setAccounts(accRes);
+            try { localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(accRes)); } catch {}
           }
-          if (txRes && Array.isArray(txRes) && txRes.length > 0) {
-            setTransactions(
-              txRes.map((t: any) => ({
-                ...t,
-                date: typeof t.date === 'string' ? t.date.split('T')[0] : t.date,
-              }))
-            );
+          if (txRes && Array.isArray(txRes)) {
+            const mappedTx = txRes.map((t: any) => ({
+              ...t,
+              date: typeof t.date === 'string' ? t.date.split('T')[0] : t.date,
+            }));
+            setTransactions(mappedTx);
+            try { localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(mappedTx)); } catch {}
           }
-          if (payRes && Array.isArray(payRes) && payRes.length > 0) {
-            setPayablesReceivables(
-              payRes.map((p: any) => ({
-                ...p,
-                dueDate: typeof p.dueDate === 'string' ? p.dueDate.split('T')[0] : p.dueDate,
-              }))
-            );
+          if (payRes && Array.isArray(payRes)) {
+            const mappedPay = payRes.map((p: any) => ({
+              ...p,
+              dueDate: typeof p.dueDate === 'string' ? p.dueDate.split('T')[0] : p.dueDate,
+            }));
+            setPayablesReceivables(mappedPay);
           }
         } catch (err) {
           console.info('Carregando base local otimizada:', err);
