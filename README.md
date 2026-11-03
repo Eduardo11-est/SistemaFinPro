@@ -190,7 +190,7 @@ O projeto está otimizado para deploy simples e rápido no **Render**.
    - **Runtime:** `Node`
    - **Build Command:**
      ```bash
-     npm install && npx prisma generate && npm run build
+     npm install --include=dev && npx prisma generate && npm run build
      ```
    - **Start Command:**
      ```bash
@@ -237,3 +237,4 @@ Como o repositório já inclui o arquivo [render.yaml](render.yaml):
 ## 📄 Licença
 
 Projeto desenvolvido sob a licença MIT. Sinta-se livre para usar e customizar.
+
