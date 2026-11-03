@@ -13,26 +13,41 @@ export async function POST(req: Request) {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    const user = await prisma.user.findUnique({
-      where: { email: cleanEmail },
-      include: {
-        memberships: {
-          include: {
-            workspace: {
-              include: {
-                accounts: true,
+    // Helper com retry para tolerar o tempo de despertar (cold start) do Neon
+    async function executeWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+      try {
+        return await fn();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes("Can't reach database") || (err as { code?: string }).code === 'P1001') {
+          await new Promise((r) => setTimeout(r, 2500));
+          return await fn();
+        }
+        throw err;
+      }
+    }
+
+    const user = await executeWithRetry(() =>
+      prisma.user.findUnique({
+        where: { email: cleanEmail },
+        include: {
+          memberships: {
+            include: {
+              workspace: {
+                include: {
+                  accounts: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      })
+    );
 
     if (!user) {
       return NextResponse.json({ error: 'E-mail ou senha incorretos.' }, { status: 401 });
     }
 
-    // Se o usuário não tem senha cadastrada (antigo seed), ou se a senha bate
     if (user.password && !verifyPassword(password, user.password)) {
       return NextResponse.json({ error: 'E-mail ou senha incorretos.' }, { status: 401 });
     }
@@ -50,6 +65,15 @@ export async function POST(req: Request) {
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Erro ao realizar login';
+    if (msg.includes("Can't reach database") || (error as { code?: string }).code === 'P1001') {
+      return NextResponse.json(
+        {
+          error:
+            'O banco de dados Neon está inicializando a partir do modo de economia de energia. Por favor, tente novamente em 10 segundos.',
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
