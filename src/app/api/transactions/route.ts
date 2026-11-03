@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, ensureNeonAwake } from '@/lib/prisma';
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+    await ensureNeonAwake();
     const workspaceId = searchParams.get('workspaceId');
 
     const where = workspaceId ? { workspaceId } : {};
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    await ensureNeonAwake();
 
     const transaction = await prisma.transaction.create({
       data: {
@@ -87,6 +89,7 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+    await ensureNeonAwake();
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
 

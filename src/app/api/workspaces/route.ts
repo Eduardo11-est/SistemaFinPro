@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, ensureNeonAwake } from '@/lib/prisma';
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+    await ensureNeonAwake();
     const userId = searchParams.get('userId');
 
     const where = userId
@@ -27,6 +28,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    await ensureNeonAwake();
     const workspace = await prisma.workspace.create({
       data: {
         name: body.name,

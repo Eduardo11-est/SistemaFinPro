@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, ensureNeonAwake } from '@/lib/prisma';
 import { hashPassword } from '@/lib/auth';
 
 export async function POST(req: Request) {
@@ -17,44 +17,25 @@ export async function POST(req: Request) {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    // Helper com retry para tolerar o tempo de despertar (cold start) do Neon
-    async function executeWithRetry<T>(fn: () => Promise<T>): Promise<T> {
-      try {
-        return await fn();
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '';
-        if (msg.includes("Can't reach database") || (err as { code?: string }).code === 'P1001') {
-          // Aguarda 2.5s para o Neon completar o spin-up e tenta de novo
-          await new Promise((r) => setTimeout(r, 2500));
-          return await fn();
-        }
-        throw err;
-      }
-    }
+    // Acorda o Neon via WebSocket antes da query Prisma TCP
+    await ensureNeonAwake();
 
-    // 1. Verificar se já existe
-    const existing = await executeWithRetry(() =>
-      prisma.user.findUnique({
-        where: { email: cleanEmail },
-      })
-    );
+    const existing = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+    });
 
     if (existing) {
       return NextResponse.json({ error: 'Este e-mail já está cadastrado no sistema.' }, { status: 400 });
     }
 
-    // 2. Criar Usuário
-    const user = await executeWithRetry(() =>
-      prisma.user.create({
-        data: {
-          name: name.trim(),
-          email: cleanEmail,
-          password: hashPassword(password),
-        },
-      })
-    );
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: cleanEmail,
+        password: hashPassword(password),
+      },
+    });
 
-    // 3. Criar Workspace Inicial do Usuário
     const wsName = workspaceName?.trim() || `${user.name} - Pessoal`;
     const workspace = await prisma.workspace.create({
       data: {
@@ -65,7 +46,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // 4. Associar Usuário como Proprietário (OWNER)
     await prisma.workspaceMember.create({
       data: {
         userId: user.id,
@@ -74,7 +54,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // 5. Criar Conta Bancária Inicial com Saldo Zerado (R$ 0,00)
     await prisma.account.create({
       data: {
         name: 'Conta Corrente Principal',
@@ -88,7 +67,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // 6. Criar Categorias Padrão
     const defaultCategories = [
       { name: 'Salário / Renda Principal', type: 'INCOME', icon: 'Briefcase', color: '#10b981' },
       { name: 'Rendimentos / Investimentos', type: 'INCOME', icon: 'TrendingUp', color: '#06b6d4' },
@@ -124,15 +102,7 @@ export async function POST(req: Request) {
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Erro ao cadastrar usuário';
-    if (msg.includes("Can't reach database") || (error as { code?: string }).code === 'P1001') {
-      return NextResponse.json(
-        {
-          error:
-            'O banco de dados Neon está inicializando a partir do modo de economia de energia. Por favor, tente novamente em 10 segundos.',
-        },
-        { status: 503 }
-      );
-    }
+    console.error('[Register Error]', msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
