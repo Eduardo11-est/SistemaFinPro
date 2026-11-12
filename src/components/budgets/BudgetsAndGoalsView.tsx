@@ -20,16 +20,24 @@ import {
 export function BudgetsAndGoalsView() {
   const {
     budgets,
+    addBudget,
+    deleteBudget,
     categories,
     goals,
     formatMoney,
     contributeToGoal,
     addGoal,
+    deleteGoal,
     currentWorkspace,
+    currentMonthPrefix,
     stats
   } = useFinance();
 
   const isPersonal = currentWorkspace.type === 'PERSONAL';
+
+  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [selectedBudgetCatId, setSelectedBudgetCatId] = useState('');
+  const [budgetLimitStr, setBudgetLimitStr] = useState('');
 
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [goalTitle, setGoalTitle] = useState('');
@@ -41,10 +49,38 @@ export function BudgetsAndGoalsView() {
   const [contributingGoalId, setContributingGoalId] = useState<string | null>(null);
   const [contributionAmountStr, setContributionAmountStr] = useState('');
 
+  const parseCurrencyInput = (raw: string): number => {
+    const cleaned = raw.trim();
+    if (!cleaned) return 0;
+    if (cleaned.includes(',')) {
+      return parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
+    }
+    return parseFloat(cleaned) || 0;
+  };
+
+  const expenseCategories = categories.filter((c) => c.type === 'EXPENSE');
+
+  const handleCreateBudget = (e: React.FormEvent) => {
+    e.preventDefault();
+    const limit = parseCurrencyInput(budgetLimitStr);
+    const catId = selectedBudgetCatId || expenseCategories[0]?.id;
+    if (!catId || limit <= 0 || !addBudget) return;
+
+    addBudget({
+      categoryId: catId,
+      monthlyLimit: limit,
+      period: currentMonthPrefix,
+      workspaceId: currentWorkspace.id,
+    });
+
+    setIsBudgetModalOpen(false);
+    setBudgetLimitStr('');
+  };
+
   const handleCreateGoal = (e: React.FormEvent) => {
     e.preventDefault();
-    const target = parseFloat(goalTargetStr.replace(',', '.')) || 0;
-    const current = parseFloat(goalCurrentStr.replace(',', '.')) || 0;
+    const target = parseCurrencyInput(goalTargetStr);
+    const current = parseCurrencyInput(goalCurrentStr);
     if (!goalTitle || target <= 0) return;
 
     addGoal({
@@ -64,7 +100,7 @@ export function BudgetsAndGoalsView() {
   };
 
   const handleConfirmContribution = (id: string) => {
-    const amount = parseFloat(contributionAmountStr.replace(',', '.')) || 0;
+    const amount = parseCurrencyInput(contributionAmountStr);
     if (amount > 0) {
       contributeToGoal(id, amount);
     }
@@ -87,8 +123,22 @@ export function BudgetsAndGoalsView() {
             </p>
           </div>
 
-          <div className="text-xs text-slate-500 font-mono">
-            Período: <strong className="text-slate-800 dark:text-slate-200">Outubro / 2026</strong>
+          <div className="flex items-center gap-3">
+            <div className="text-xs text-slate-500 font-mono">
+              Período: <strong className="text-slate-800 dark:text-slate-200">{currentMonthPrefix}</strong>
+            </div>
+            <button
+              onClick={() => {
+                if (!selectedBudgetCatId && expenseCategories[0]?.id) {
+                  setSelectedBudgetCatId(expenseCategories[0].id);
+                }
+                setIsBudgetModalOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Definir Teto de Categoria</span>
+            </button>
           </div>
         </div>
 
@@ -284,6 +334,71 @@ export function BudgetsAndGoalsView() {
                 <span className="text-[10px] text-emerald-500 font-mono">{proj.trend} vs atual</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Definir Teto de Orçamento por Categoria */}
+      {isBudgetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                Definir Teto Mensal por Categoria
+              </h3>
+              <button onClick={() => setIsBudgetModalOpen(false)}>
+                <X className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateBudget} className="space-y-3 pt-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Categoria de Despesa
+                </label>
+                <select
+                  value={selectedBudgetCatId || expenseCategories[0]?.id || ''}
+                  onChange={(e) => setSelectedBudgetCatId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  {expenseCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Limite Mensal de Gastos (R$)
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: 1500,00"
+                  value={budgetLimitStr}
+                  onChange={(e) => setBudgetLimitStr(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBudgetModalOpen(false)}
+                  className="px-3 py-1.5 text-xs text-slate-500"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold"
+                >
+                  Salvar Orçamento
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

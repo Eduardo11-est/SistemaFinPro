@@ -78,6 +78,29 @@ export async function POST(req: Request) {
         ? String(body.costCenterId)
         : undefined;
 
+    // Garante que a conta bancária exista no banco para evitar falha de chave estrangeira
+    let resolvedAccountId = String(body.accountId);
+    if (resolvedAccountId.startsWith('acc-')) {
+      const firstWsAcc = await prisma.account.findFirst({ where: { workspaceId } });
+      if (firstWsAcc) {
+        resolvedAccountId = firstWsAcc.id;
+      } else {
+        const createdDefaultAcc = await prisma.account.create({
+          data: {
+            name: 'Conta Corrente Principal',
+            type: 'CHECKING',
+            bankName: 'Meu Banco',
+            currency,
+            initialBalance: 0,
+            currentBalance: 0,
+            color: '#10b981',
+            workspaceId,
+          },
+        });
+        resolvedAccountId = createdDefaultAcc.id;
+      }
+    }
+
     const cleanTags = Array.isArray(body.tags)
       ? body.tags
           .map((t: unknown) => sanitizeText(t, 40).toLowerCase())
@@ -104,8 +127,11 @@ export async function POST(req: Request) {
         recurrenceFrequency: body.recurrenceFrequency || 'NONE',
         linkedTransactionId: body.linkedTransactionId,
         workspaceId,
-        accountId: String(body.accountId),
-        targetAccountId: body.targetAccountId ? String(body.targetAccountId) : undefined,
+        accountId: resolvedAccountId,
+        targetAccountId:
+          body.targetAccountId && !String(body.targetAccountId).startsWith('acc-')
+            ? String(body.targetAccountId)
+            : undefined,
         categoryId: safeCategoryId,
         costCenterId: safeCostCenterId,
       },
@@ -114,20 +140,20 @@ export async function POST(req: Request) {
     // Atualizar saldo da conta no Neon
     if (txType === 'INCOME') {
       await prisma.account.update({
-        where: { id: String(body.accountId) },
+        where: { id: resolvedAccountId },
         data: { currentBalance: { increment: validAmount } },
       });
     } else if (txType === 'EXPENSE') {
       await prisma.account.update({
-        where: { id: String(body.accountId) },
+        where: { id: resolvedAccountId },
         data: { currentBalance: { decrement: validAmount } },
       });
     } else if (txType === 'TRANSFER') {
       await prisma.account.update({
-        where: { id: String(body.accountId) },
+        where: { id: resolvedAccountId },
         data: { currentBalance: { decrement: validAmount } },
       });
-      if (body.targetAccountId) {
+      if (body.targetAccountId && !String(body.targetAccountId).startsWith('acc-')) {
         await prisma.account.update({
           where: { id: String(body.targetAccountId) },
           data: { currentBalance: { increment: validAmount } },

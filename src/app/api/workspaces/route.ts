@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
-import { resolveRequestUserId } from '@/lib/auth';
-import { sanitizeText, getSafeErrorMessage } from '@/lib/security';
+import { resolveRequestUserId, verifyWorkspaceAccess } from '@/lib/auth';
+import { sanitizeText, sanitizePositiveAmount, getSafeErrorMessage } from '@/lib/security';
+
+export const SALARY_COST_CENTER_CODE = '__SALARY_CONFIG__';
 
 export async function GET(req: Request) {
   try {
@@ -116,6 +118,82 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     return NextResponse.json(
       { error: getSafeErrorMessage(error, 'Erro ao criar workspace') },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    await ensureNeonAwake();
+
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
+    const workspaceId = sanitizeText(body.workspaceId || body.id, 100);
+
+    if (!workspaceId) {
+      return NextResponse.json({ error: 'workspaceId é obrigatório.' }, { status: 400 });
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado a este workspace.' }, { status: 403 });
+      }
+    }
+
+    // Persistência do Salário / Renda Mensal no banco Neon PostgreSQL
+    if (body.monthlySalary !== undefined) {
+      const salaryValue = sanitizePositiveAmount(body.monthlySalary, true) ?? 0;
+
+      const existingSalaryConfig = await prisma.costCenter.findFirst({
+        where: {
+          workspaceId,
+          code: SALARY_COST_CENTER_CODE,
+        },
+      });
+
+      if (existingSalaryConfig) {
+        await prisma.costCenter.update({
+          where: { id: existingSalaryConfig.id },
+          data: {
+            budgetLimit: salaryValue,
+            name: 'Salário / Renda Mensal Configurada',
+          },
+        });
+      } else {
+        await prisma.costCenter.create({
+          data: {
+            code: SALARY_COST_CENTER_CODE,
+            name: 'Salário / Renda Mensal Configurada',
+            description: 'Configuração de salário/renda base mensal do workspace',
+            budgetLimit: salaryValue,
+            workspaceId,
+          },
+        });
+      }
+    }
+
+    // Atualização opcional de dados cadastrais do workspace
+    if (body.name || body.document !== undefined || body.legalName !== undefined) {
+      await prisma.workspace.update({
+        where: { id: workspaceId },
+        data: {
+          ...(body.name ? { name: sanitizeText(body.name, 100) } : {}),
+          ...(body.document !== undefined ? { document: sanitizeText(body.document, 30) || null } : {}),
+          ...(body.legalName !== undefined ? { legalName: sanitizeText(body.legalName, 140) || null } : {}),
+        },
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      workspaceId,
+      monthlySalary: body.monthlySalary !== undefined ? (sanitizePositiveAmount(body.monthlySalary, true) ?? 0) : undefined,
+    });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao salvar configurações do workspace') },
       { status: 500 }
     );
   }

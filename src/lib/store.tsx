@@ -99,9 +99,12 @@ interface FinanceContextType {
 
   // Budgets & Goals
   budgets: Budget[];
+  addBudget?: (budget: { categoryId: string; monthlyLimit: number; period?: string; workspaceId: string }) => void;
+  deleteBudget?: (id: string) => void;
   goals: Goal[];
   addGoal: (goal: Omit<Goal, 'id'>) => void;
   contributeToGoal: (id: string, amount: number) => void;
+  deleteGoal?: (id: string) => void;
 
   // Modals & UI States
   isNewTransactionModalOpen: boolean;
@@ -205,7 +208,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [payablesReceivables, setPayablesReceivables] = useState<PayableReceivable[]>(
     INITIAL_PAYABLES_RECEIVABLES
   );
-  const [budgets] = useState<Budget[]>(INITIAL_BUDGETS);
+  const [budgets, setBudgets] = useState<Budget[]>(INITIAL_BUDGETS);
   const [goals, setGoals] = useState<Goal[]>(INITIAL_GOALS);
 
   // Salary per workspace (isolado por cliente)
@@ -245,6 +248,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setCostCenters([]);
     setTransactions([]);
     setPayablesReceivables([]);
+    setBudgets([]);
     setGoals([]);
     setSalariesByWorkspace({});
   }, []);
@@ -274,6 +278,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
       const savedSalaries = localStorage.getItem(getUserStorageKey(userId, 'salaries'));
       setSalariesByWorkspace(savedSalaries ? JSON.parse(savedSalaries) : {});
+
+      const savedBudgets = localStorage.getItem(getUserStorageKey(userId, 'budgets'));
+      setBudgets(savedBudgets ? JSON.parse(savedBudgets) : []);
 
       const savedGoals = localStorage.getItem(getUserStorageKey(userId, 'goals'));
       setGoals(savedGoals ? JSON.parse(savedGoals) : []);
@@ -328,12 +335,14 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         const userParam = `?userId=${encodeURIComponent(userId)}`;
         const headers = { 'x-user-id': userId };
 
-        const [wsRes, accRes, catRes, txRes, payRes] = await Promise.all([
+        const [wsRes, accRes, catRes, txRes, payRes, goalsRes, budgetsRes] = await Promise.all([
           fetch(`/api/workspaces${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/accounts${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/categories${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/transactions${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/payables${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/goals${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/budgets${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         ]);
 
         let activeWsId = currentWorkspaceIdRef.current;
@@ -350,12 +359,70 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           }
 
           const embeddedCostCenters: CostCenter[] = [];
+          const dbSalaries: Record<string, number> = {};
+
           wsRes.forEach((w: Workspace & { costCenters?: CostCenter[] }) => {
             if (Array.isArray(w.costCenters)) {
-              embeddedCostCenters.push(...w.costCenters);
+              w.costCenters.forEach((cc) => {
+                if (cc.code === '__SALARY_CONFIG__') {
+                  if (typeof cc.budgetLimit === 'number' && cc.budgetLimit >= 0) {
+                    dbSalaries[w.id] = cc.budgetLimit;
+                  }
+                } else {
+                  embeddedCostCenters.push(cc);
+                }
+              });
             }
           });
           setCostCenters(embeddedCostCenters);
+
+          // Mescla salários vindos do banco Neon com qualquer valor previamente salvo localmente,
+          // e sincroniza automaticamente para o banco caso só existisse localmente
+          setSalariesByWorkspace((prev) => {
+            let localSaved: Record<string, number> = {};
+            try {
+              const raw = localStorage.getItem(getUserStorageKey(userId, 'salaries'));
+              if (raw) localSaved = JSON.parse(raw);
+            } catch {}
+
+            const merged: Record<string, number> = { ...localSaved, ...prev, ...dbSalaries };
+
+            // Se o usuário salvou salário quando o ID temporário ainda era 'ws-personal', migra para o workspace real
+            const firstPersonalWs = wsRes.find((w: Workspace) => w.type === 'PERSONAL') || wsRes[0];
+            if (
+              firstPersonalWs &&
+              merged[firstPersonalWs.id] === undefined &&
+              merged['ws-personal'] &&
+              merged['ws-personal'] > 0
+            ) {
+              merged[firstPersonalWs.id] = merged['ws-personal'];
+              delete merged['ws-personal'];
+            }
+
+            // Se algum workspace tem salário local mas ainda não estava gravado no Neon, grava agora
+            wsRes.forEach((w: Workspace) => {
+              const localVal = merged[w.id];
+              if (localVal && localVal > 0 && dbSalaries[w.id] === undefined) {
+                fetch('/api/workspaces', {
+                  method: 'PATCH',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-user-id': userId,
+                  },
+                  body: JSON.stringify({
+                    workspaceId: w.id,
+                    monthlySalary: localVal,
+                    userId,
+                  }),
+                }).catch(() => {});
+              }
+            });
+
+            try {
+              localStorage.setItem(getUserStorageKey(userId, 'salaries'), JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
         }
 
         if (accRes && Array.isArray(accRes)) {
@@ -424,6 +491,32 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           setPayablesReceivables(mappedPay);
           try {
             localStorage.setItem(getUserStorageKey(userId, 'pay'), JSON.stringify(mappedPay));
+          } catch {}
+        }
+
+        if (goalsRes && Array.isArray(goalsRes)) {
+          const mappedGoals = goalsRes.map((g: Goal) => ({
+            ...g,
+            targetDate:
+              typeof g.targetDate === 'string' ? g.targetDate.split('T')[0] : g.targetDate,
+          }));
+          setGoals(mappedGoals);
+          try {
+            localStorage.setItem(getUserStorageKey(userId, 'goals'), JSON.stringify(mappedGoals));
+          } catch {}
+        }
+
+        if (budgetsRes && Array.isArray(budgetsRes)) {
+          const mappedBudgets = budgetsRes.map((b: Budget) => ({
+            ...b,
+            currentSpent: b.currentSpent || 0,
+          }));
+          setBudgets(mappedBudgets);
+          try {
+            localStorage.setItem(
+              getUserStorageKey(userId, 'budgets'),
+              JSON.stringify(mappedBudgets)
+            );
           } catch {}
         }
       } catch (err) {
@@ -529,12 +622,38 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
           const loginAccounts: Account[] = [];
           const loginCats: Category[] = [];
+          const loginSalaries: Record<string, number> = {};
           data.workspaces.forEach(
-            (w: Workspace & { accounts?: Account[]; categories?: Category[] }) => {
+            (
+              w: Workspace & {
+                accounts?: Account[];
+                categories?: Category[];
+                costCenters?: CostCenter[];
+              }
+            ) => {
               if (Array.isArray(w.accounts)) loginAccounts.push(...w.accounts);
               if (Array.isArray(w.categories)) loginCats.push(...w.categories);
+              if (Array.isArray(w.costCenters)) {
+                w.costCenters.forEach((cc) => {
+                  if (cc.code === '__SALARY_CONFIG__' && typeof cc.budgetLimit === 'number') {
+                    loginSalaries[w.id] = cc.budgetLimit;
+                  }
+                });
+              }
             }
           );
+          if (Object.keys(loginSalaries).length > 0) {
+            setSalariesByWorkspace((prev) => {
+              const merged = { ...prev, ...loginSalaries };
+              try {
+                localStorage.setItem(
+                  getUserStorageKey(loggedUser.id, 'salaries'),
+                  JSON.stringify(merged)
+                );
+              } catch {}
+              return merged;
+            });
+          }
           if (loginAccounts.length > 0) {
             setAccounts(loginAccounts);
             try {
@@ -672,25 +791,48 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     );
   }, [workspaces, currentWorkspaceId]);
 
-  // Salary getter & setter (persistido por usuário e workspace)
+  // Salary getter & setter (persistido no Neon PostgreSQL e no cache local por usuário/workspace)
   const monthlySalary = useMemo(() => {
-    return salariesByWorkspace[currentWorkspaceId] || 0;
-  }, [salariesByWorkspace, currentWorkspaceId]);
+    return (
+      salariesByWorkspace[currentWorkspaceId] ??
+      salariesByWorkspace[currentWorkspace?.id] ??
+      0
+    );
+  }, [salariesByWorkspace, currentWorkspaceId, currentWorkspace?.id]);
 
-  const setMonthlySalary = useCallback((amount: number, workspaceId?: string) => {
-    const targetWs = workspaceId || currentWorkspaceIdRef.current;
-    const uid = currentUserIdRef.current;
-    const sanitized = Math.max(0, Number(amount) || 0);
-    setSalariesByWorkspace((prev) => {
-      const next = { ...prev, [targetWs]: sanitized };
-      if (uid) {
-        try {
-          localStorage.setItem(getUserStorageKey(uid, 'salaries'), JSON.stringify(next));
-        } catch {}
+  const setMonthlySalary = useCallback(
+    (amount: number, workspaceId?: string) => {
+      const targetWs = workspaceId || currentWorkspaceIdRef.current || currentWorkspace?.id;
+      const uid = currentUserIdRef.current;
+      const sanitized = Math.max(0, Number(amount) || 0);
+
+      setSalariesByWorkspace((prev) => {
+        const next = { ...prev, [targetWs]: sanitized };
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'salaries'), JSON.stringify(next));
+          } catch {}
+        }
+        return next;
+      });
+
+      if (targetWs && !targetWs.startsWith('ws-')) {
+        fetch('/api/workspaces', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(uid ? { 'x-user-id': uid } : {}),
+          },
+          body: JSON.stringify({
+            workspaceId: targetWs,
+            monthlySalary: sanitized,
+            userId: uid,
+          }),
+        }).catch(() => {});
       }
-      return next;
-    });
-  }, []);
+    },
+    [currentWorkspace?.id]
+  );
 
   // Currency converter
   const convertAmount = useCallback(
@@ -754,8 +896,25 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   }, [payablesReceivables, currentWorkspaceId]);
 
   const currentBudgets = useMemo(() => {
-    return budgets.filter((b) => b.workspaceId === currentWorkspaceId);
-  }, [budgets, currentWorkspaceId]);
+    const wsBudgets = budgets.filter((b) => b.workspaceId === currentWorkspaceId);
+    const spentByCategory = new Map<string, number>();
+    for (let i = 0; i < currentTransactions.length; i++) {
+      const tx = currentTransactions[i];
+      if (
+        tx.type === 'EXPENSE' &&
+        tx.status === 'COMPLETED' &&
+        tx.categoryId &&
+        tx.date.startsWith(currentMonthPrefix)
+      ) {
+        const prev = spentByCategory.get(tx.categoryId) || 0;
+        spentByCategory.set(tx.categoryId, prev + tx.amount);
+      }
+    }
+    return wsBudgets.map((b) => ({
+      ...b,
+      currentSpent: spentByCategory.get(b.categoryId) ?? b.currentSpent ?? 0,
+    }));
+  }, [budgets, currentWorkspaceId, currentTransactions, currentMonthPrefix]);
 
   const currentGoals = useMemo(() => {
     return goals.filter((g) => g.workspaceId === currentWorkspaceId);
@@ -814,6 +973,17 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       }
       return updated;
     });
+
+    if (!id.startsWith('acc-')) {
+      fetch('/api/accounts', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-id': uid } : {}),
+        },
+        body: JSON.stringify({ id, ...updates, userId: uid }),
+      }).catch(() => {});
+    }
   }, []);
 
   const deleteAccount = useCallback((id: string) => {
@@ -827,6 +997,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       }
       return updated;
     });
+
+    if (!id.startsWith('acc-')) {
+      fetch(
+        `/api/accounts?id=${encodeURIComponent(id)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: uid ? { 'x-user-id': uid } : undefined,
+        }
+      ).catch(() => {});
+    }
   }, []);
 
   // Category & Workspace actions
@@ -1051,6 +1231,35 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           }
         })
         .catch(() => {});
+
+      // Se houve transação espelho (ex: Pró-Labore PJ -> PF), grava também no banco Neon
+      extraTransactions.forEach((mirror) => {
+        fetch('/api/transactions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(uid ? { 'x-user-id': uid } : {}),
+          },
+          body: JSON.stringify({ ...mirror, userId: uid }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((createdMirror) => {
+            if (createdMirror?.id) {
+              setTransactions((prev) => {
+                const updated = prev.map((t) =>
+                  t.id === mirror.id ? { ...mirror, id: createdMirror.id } : t
+                );
+                if (uid) {
+                  try {
+                    localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+                  } catch {}
+                }
+                return updated;
+              });
+            }
+          })
+          .catch(() => {});
+      });
     },
     [accounts, categories, currentWorkspace.name]
   );
@@ -1164,7 +1373,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   // Payables & Receivables
   const addPayableReceivable = useCallback((pr: Omit<PayableReceivable, 'id'>) => {
     const uid = currentUserIdRef.current;
-    const newPr = { ...pr, id: `pr-${Date.now()}` };
+    const tempId = `pr-${Date.now()}`;
+    const newPr = { ...pr, id: tempId };
     setPayablesReceivables((prev) => {
       const updated = [...prev, newPr];
       if (uid) {
@@ -1182,7 +1392,33 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         ...(uid ? { 'x-user-id': uid } : {}),
       },
       body: JSON.stringify({ ...newPr, userId: uid }),
-    }).catch(() => {});
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((created) => {
+        if (created?.id) {
+          setPayablesReceivables((prev) => {
+            const updated = prev.map((item) =>
+              item.id === tempId
+                ? {
+                    ...newPr,
+                    id: created.id,
+                    dueDate:
+                      typeof created.dueDate === 'string'
+                        ? created.dueDate.split('T')[0]
+                        : newPr.dueDate,
+                  }
+                : item
+            );
+            if (uid) {
+              try {
+                localStorage.setItem(getUserStorageKey(uid, 'pay'), JSON.stringify(updated));
+              } catch {}
+            }
+            return updated;
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const settlePayableReceivable = useCallback(
@@ -1246,11 +1482,103 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     [addTransaction]
   );
 
-  // Goals (isoladas por usuário)
+  // Budgets & Goals (persistidos no Neon PostgreSQL e isolados por usuário)
+  const addBudget = useCallback(
+    (budgetInput: {
+      categoryId: string;
+      monthlyLimit: number;
+      period?: string;
+      workspaceId: string;
+    }) => {
+      const uid = currentUserIdRef.current;
+      const period = budgetInput.period || currentMonthPrefix;
+      const tempId = `bdg-${Date.now()}`;
+      const newBudget: Budget = {
+        id: tempId,
+        categoryId: budgetInput.categoryId,
+        monthlyLimit: budgetInput.monthlyLimit,
+        currentSpent: 0,
+        period,
+        workspaceId: budgetInput.workspaceId,
+      };
+
+      setBudgets((prev) => {
+        const filtered = prev.filter(
+          (b) =>
+            !(
+              b.workspaceId === newBudget.workspaceId &&
+              b.categoryId === newBudget.categoryId &&
+              b.period === newBudget.period
+            )
+        );
+        const updated = [...filtered, newBudget];
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'budgets'), JSON.stringify(updated));
+          } catch {}
+        }
+        return updated;
+      });
+
+      fetch('/api/budgets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-id': uid } : {}),
+        },
+        body: JSON.stringify({ ...newBudget, userId: uid }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((created) => {
+          if (created?.id) {
+            setBudgets((prev) => {
+              const updated = prev.map((b) =>
+                b.id === tempId ? { ...newBudget, id: created.id } : b
+              );
+              if (uid) {
+                try {
+                  localStorage.setItem(getUserStorageKey(uid, 'budgets'), JSON.stringify(updated));
+                } catch {}
+              }
+              return updated;
+            });
+          }
+        })
+        .catch(() => {});
+    },
+    [currentMonthPrefix]
+  );
+
+  const deleteBudget = useCallback((id: string) => {
+    const uid = currentUserIdRef.current;
+    setBudgets((prev) => {
+      const updated = prev.filter((b) => b.id !== id);
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'budgets'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    if (!id.startsWith('bdg-')) {
+      fetch(
+        `/api/budgets?id=${encodeURIComponent(id)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: uid ? { 'x-user-id': uid } : undefined,
+        }
+      ).catch(() => {});
+    }
+  }, []);
+
   const addGoal = useCallback((goal: Omit<Goal, 'id'>) => {
     const uid = currentUserIdRef.current;
+    const tempId = `goal-${Date.now()}`;
+    const newGoal: Goal = { ...goal, id: tempId };
+
     setGoals((prev) => {
-      const updated = [...prev, { ...goal, id: `goal-${Date.now()}` }];
+      const updated = [...prev, newGoal];
       if (uid) {
         try {
           localStorage.setItem(getUserStorageKey(uid, 'goals'), JSON.stringify(updated));
@@ -1258,6 +1586,41 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       }
       return updated;
     });
+
+    fetch('/api/goals', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(uid ? { 'x-user-id': uid } : {}),
+      },
+      body: JSON.stringify({ ...newGoal, userId: uid }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((created) => {
+        if (created?.id) {
+          setGoals((prev) => {
+            const updated = prev.map((g) =>
+              g.id === tempId
+                ? {
+                    ...newGoal,
+                    id: created.id,
+                    targetDate:
+                      typeof created.targetDate === 'string'
+                        ? created.targetDate.split('T')[0]
+                        : newGoal.targetDate,
+                  }
+                : g
+            );
+            if (uid) {
+              try {
+                localStorage.setItem(getUserStorageKey(uid, 'goals'), JSON.stringify(updated));
+              } catch {}
+            }
+            return updated;
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const contributeToGoal = useCallback((id: string, amount: number) => {
@@ -1273,6 +1636,44 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       }
       return updated;
     });
+
+    if (!id.startsWith('goal-')) {
+      fetch('/api/goals', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-id': uid } : {}),
+        },
+        body: JSON.stringify({
+          id,
+          contributionAmount: amount,
+          userId: uid,
+        }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  const deleteGoal = useCallback((id: string) => {
+    const uid = currentUserIdRef.current;
+    setGoals((prev) => {
+      const updated = prev.filter((g) => g.id !== id);
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'goals'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    if (!id.startsWith('goal-')) {
+      fetch(
+        `/api/goals?id=${encodeURIComponent(id)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: uid ? { 'x-user-id': uid } : undefined,
+        }
+      ).catch(() => {});
+    }
   }, []);
 
   // Compute stats and KPIs
@@ -1388,9 +1789,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       settlePayableReceivable,
 
       budgets: currentBudgets,
+      addBudget,
+      deleteBudget,
       goals: currentGoals,
       addGoal,
       contributeToGoal,
+      deleteGoal,
 
       isNewTransactionModalOpen,
       setIsNewTransactionModalOpen: handleSetModalOpen,
@@ -1443,9 +1847,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       addPayableReceivable,
       settlePayableReceivable,
       currentBudgets,
+      addBudget,
+      deleteBudget,
       currentGoals,
       addGoal,
       contributeToGoal,
+      deleteGoal,
       isNewTransactionModalOpen,
       handleSetModalOpen,
       activeView,

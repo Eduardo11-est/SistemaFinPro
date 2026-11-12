@@ -60,6 +60,10 @@ export async function POST(req: Request) {
       body.categoryId && !String(body.categoryId).startsWith('cat-')
         ? String(body.categoryId)
         : undefined;
+    const safeAccountId =
+      body.accountId && !String(body.accountId).startsWith('acc-')
+        ? String(body.accountId)
+        : undefined;
 
     const item = await prisma.payableReceivable.create({
       data: {
@@ -73,7 +77,7 @@ export async function POST(req: Request) {
         interestRateDaily: sanitizePositiveAmount(body.interestRateDaily, true) ?? 0,
         accruedInterest: sanitizePositiveAmount(body.accruedInterest, true) ?? 0,
         workspaceId,
-        accountId: body.accountId ? String(body.accountId) : undefined,
+        accountId: safeAccountId,
         categoryId: safeCategoryId,
       },
     });

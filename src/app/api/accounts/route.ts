@@ -88,3 +88,88 @@ export async function POST(req: Request) {
     );
   }
 }
+
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    await ensureNeonAwake();
+
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
+    const id = sanitizeText(body.id, 100);
+    if (!id) {
+      return NextResponse.json({ error: 'ID da conta é obrigatório' }, { status: 400 });
+    }
+
+    const existing = await prisma.account.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Conta não encontrada' }, { status: 404 });
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, existing.workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 });
+      }
+    }
+
+    const updated = await prisma.account.update({
+      where: { id },
+      data: {
+        ...(body.name ? { name: sanitizeText(body.name, 100) } : {}),
+        ...(body.bankName !== undefined ? { bankName: sanitizeText(body.bankName, 80) || null } : {}),
+        ...(body.type ? { type: body.type } : {}),
+        ...(body.currency ? { currency: body.currency } : {}),
+        ...(body.currentBalance !== undefined && Number.isFinite(Number(body.currentBalance))
+          ? { currentBalance: Number(body.currentBalance) }
+          : {}),
+        ...(body.creditLimit !== undefined
+          ? { creditLimit: sanitizePositiveAmount(body.creditLimit, true) ?? null }
+          : {}),
+        ...(body.closingDay !== undefined ? { closingDay: body.closingDay ? Number(body.closingDay) : null } : {}),
+        ...(body.dueDay !== undefined ? { dueDay: body.dueDay ? Number(body.dueDay) : null } : {}),
+        ...(body.color ? { color: sanitizeText(body.color, 20) } : {}),
+      },
+    });
+
+    return NextResponse.json(updated);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao atualizar conta') },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    await ensureNeonAwake();
+
+    const id = sanitizeText(searchParams.get('id'), 100);
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
+
+    if (!id) {
+      return NextResponse.json({ error: 'ID da conta é obrigatório' }, { status: 400 });
+    }
+
+    const existing = await prisma.account.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ success: true });
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, existing.workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 });
+      }
+    }
+
+    await prisma.account.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao excluir conta') },
+      { status: 500 }
+    );
+  }
+}
