@@ -11,24 +11,46 @@ import {
   Building,
   Plus,
   Shield,
-  Key,
-  Terminal,
-  Lock,
-  Layers,
-  Sparkles
+  Sparkles,
+  Wallet,
+  Tag,
+  Trash2,
 } from 'lucide-react';
 import { NeonStatus } from '@/lib/neon';
 
 export function SettingsAndNeonView() {
-  const { workspaces, addWorkspace, currentWorkspace } = useFinance();
+  const {
+    workspaces,
+    addWorkspace,
+    currentWorkspace,
+    monthlySalary,
+    setMonthlySalary,
+    formatMoney,
+    categories,
+    addCategory,
+    deleteCategory,
+  } = useFinance();
 
   const [neonStatus, setNeonStatus] = useState<NeonStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Salário / Renda Mensal form
+  const [salaryStr, setSalaryStr] = useState('');
+  const [salarySavedFeedback, setSalarySavedFeedback] = useState(false);
+
+  // Nova Categoria form
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatType, setNewCatType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
+  const [newCatColor, setNewCatColor] = useState('#10b981');
 
   // New company form
   const [companyName, setCompanyName] = useState('');
   const [legalName, setLegalName] = useState('');
   const [documentCNPJ, setDocumentCNPJ] = useState('');
+
+  useEffect(() => {
+    setSalaryStr(monthlySalary > 0 ? String(monthlySalary).replace('.', ',') : '');
+  }, [monthlySalary, currentWorkspace.id]);
 
   const fetchStatus = async () => {
     setIsLoading(true);
@@ -52,6 +74,27 @@ export function SettingsAndNeonView() {
     fetchStatus();
   }, []);
 
+  const handleSaveSalarySettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(salaryStr.replace(/\./g, '').replace(',', '.'));
+    setMonthlySalary(isNaN(val) ? 0 : val);
+    setSalarySavedFeedback(true);
+    setTimeout(() => setSalarySavedFeedback(false), 2500);
+  };
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    await addCategory({
+      name: newCatName.trim(),
+      type: newCatType,
+      color: newCatColor,
+      icon: 'Tag',
+      workspaceId: currentWorkspace.id,
+    });
+    setNewCatName('');
+  };
+
   const handleCreateCompany = (e: React.FormEvent) => {
     e.preventDefault();
     if (!companyName.trim()) return;
@@ -73,7 +116,147 @@ export function SettingsAndNeonView() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-      {/* SEÇÃO 1: Painel do Neon PostgreSQL */}
+      {/* SEÇÃO 1: Configuração de Salário / Renda Mensal & Categorias */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Card: Configuração de Salário / Renda Mensal */}
+        <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                <Wallet className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Configuração de Salário / Renda Mensal
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Base de cálculo para o indicador de gastos mensais em{' '}
+                  <strong>{currentWorkspace.name}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-500">Salário / Renda Atual Configurada:</span>
+              <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
+                {monthlySalary > 0 ? formatMoney(monthlySalary) : 'Não definido'}
+              </span>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveSalarySettings} className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Valor do Salário / Renda Mensal (R$)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Ex: 8500,00"
+                  value={salaryStr}
+                  onChange={(e) => setSalaryStr(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all"
+                >
+                  Salvar Salário
+                </button>
+              </div>
+            </div>
+
+            {salarySavedFeedback && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Salário mensal atualizado com sucesso!</span>
+              </p>
+            )}
+          </form>
+        </div>
+
+        {/* Card: Gestão de Categorias Ativas */}
+        <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+              <Tag className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Categorias Ativas ({categories.length})
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Categorias disponíveis ao criar ou editar transações neste espaço
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleCreateCategory} className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              placeholder="Nova categoria..."
+              value={newCatName}
+              onChange={(e) => setNewCatName(e.target.value)}
+              className="flex-1 min-w-[140px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+            />
+            <select
+              value={newCatType}
+              onChange={(e) => setNewCatType(e.target.value as 'EXPENSE' | 'INCOME')}
+              className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+            >
+              <option value="EXPENSE">Despesa (-)</option>
+              <option value="INCOME">Receita (+)</option>
+            </select>
+            <input
+              type="color"
+              value={newCatColor}
+              onChange={(e) => setNewCatColor(e.target.value)}
+              className="w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer bg-transparent"
+              title="Cor da Categoria"
+            />
+            <button
+              type="submit"
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Adicionar</span>
+            </button>
+          </form>
+
+          <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 pr-1">
+            {categories.map((cat) => (
+              <div key={cat.id} className="py-2 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: cat.color || '#10b981' }}
+                  />
+                  <span className="font-medium text-slate-800 dark:text-slate-200">{cat.name}</span>
+                  <span
+                    className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                      cat.type === 'INCOME'
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => deleteCategory(cat.id)}
+                  className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
+                  title="Remover Categoria"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* SEÇÃO 2: Painel do Neon PostgreSQL */}
       <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -180,7 +363,7 @@ export function SettingsAndNeonView() {
         </div>
       </div>
 
-      {/* SEÇÃO 2: Gestão Multiempresa (Cadastro de novos CNPJs) */}
+      {/* SEÇÃO 3: Gestão Multiempresa (Cadastro de novos CNPJs) */}
       <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
         <div>
           <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -269,7 +452,7 @@ export function SettingsAndNeonView() {
         </form>
       </div>
 
-      {/* SEÇÃO 3: Segurança & Logs de Auditoria */}
+      {/* SEÇÃO 4: Segurança & Logs de Auditoria */}
       <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3">
         <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <Shield className="w-5 h-5 text-emerald-500" />

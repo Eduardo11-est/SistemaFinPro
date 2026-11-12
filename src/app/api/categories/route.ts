@@ -1,0 +1,127 @@
+import { NextResponse } from 'next/server';
+import { prisma, ensureNeonAwake } from '@/lib/prisma';
+
+const DEFAULT_PERSONAL_CATEGORIES = [
+  { name: 'Salário / Renda Principal', type: 'INCOME' as const, icon: 'Briefcase', color: '#10b981' },
+  { name: 'Rendimentos / Investimentos', type: 'INCOME' as const, icon: 'TrendingUp', color: '#06b6d4' },
+  { name: 'Serviços & Consultorias', type: 'INCOME' as const, icon: 'Laptop', color: '#3b82f6' },
+  { name: 'Outras Receitas', type: 'INCOME' as const, icon: 'Plus', color: '#14b8a6' },
+  { name: 'Moradia & Contas', type: 'EXPENSE' as const, icon: 'Home', color: '#ef4444' },
+  { name: 'Alimentação & Mercado', type: 'EXPENSE' as const, icon: 'ShoppingBag', color: '#f97316' },
+  { name: 'Transporte & Combustível', type: 'EXPENSE' as const, icon: 'Car', color: '#f59e0b' },
+  { name: 'Saúde & Farmácia', type: 'EXPENSE' as const, icon: 'Heart', color: '#ec4899' },
+  { name: 'Educação & Cursos', type: 'EXPENSE' as const, icon: 'BookOpen', color: '#6366f1' },
+  { name: 'Lazer & Restaurantes', type: 'EXPENSE' as const, icon: 'Compass', color: '#8b5cf6' },
+  { name: 'Outras Despesas', type: 'EXPENSE' as const, icon: 'Tag', color: '#64748b' },
+];
+
+const DEFAULT_CORPORATE_CATEGORIES = [
+  { name: 'Faturamento de Serviços / Vendas', type: 'INCOME' as const, icon: 'Briefcase', color: '#10b981' },
+  { name: 'Contratos Recorrentes (MRR)', type: 'INCOME' as const, icon: 'TrendingUp', color: '#06b6d4' },
+  { name: 'Rendimentos Financeiros PJ', type: 'INCOME' as const, icon: 'Plus', color: '#3b82f6' },
+  { name: 'Folha & Pró-Labore', type: 'EXPENSE' as const, icon: 'Users', color: '#6366f1' },
+  { name: 'Impostos & Taxas (DAS / ISS / IRPJ)', type: 'EXPENSE' as const, icon: 'FileText', color: '#ef4444' },
+  { name: 'Infraestrutura & Cloud / SaaS', type: 'EXPENSE' as const, icon: 'Server', color: '#0ea5e9' },
+  { name: 'Marketing & Aquisição (Ads)', type: 'EXPENSE' as const, icon: 'Megaphone', color: '#f97316' },
+  { name: ' Administrativo & Contabilidade', type: 'EXPENSE' as const, icon: 'Building', color: '#f59e0b' },
+  { name: 'Fornecedores & Operação', type: 'EXPENSE' as const, icon: 'Truck', color: '#8b5cf6' },
+  { name: 'Despesas Bancárias & Tarifas', type: 'EXPENSE' as const, icon: 'CreditCard', color: '#64748b' },
+];
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    await ensureNeonAwake();
+    const workspaceId = searchParams.get('workspaceId');
+    const where = workspaceId ? { workspaceId } : {};
+
+    let categories = await prisma.category.findMany({
+      where,
+      include: {
+        subcategories: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    // Se um workspace específico foi consultado e não possui categorias no banco,
+    // popula automaticamente com as categorias padrão ativas daquele contexto.
+    if (workspaceId && categories.length === 0) {
+      const ws = await prisma.workspace.findUnique({ where: { id: workspaceId } });
+      if (ws) {
+        const defaults =
+          ws.type === 'CORPORATE' ? DEFAULT_CORPORATE_CATEGORIES : DEFAULT_PERSONAL_CATEGORIES;
+        for (const cat of defaults) {
+          await prisma.category.create({
+            data: {
+              name: cat.name.trim(),
+              type: cat.type,
+              icon: cat.icon,
+              color: cat.color,
+              workspaceId: ws.id,
+            },
+          });
+        }
+        categories = await prisma.category.findMany({
+          where: { workspaceId },
+          include: { subcategories: true },
+          orderBy: { name: 'asc' },
+        });
+      }
+    }
+
+    return NextResponse.json(categories);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Erro ao listar categorias';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    await ensureNeonAwake();
+
+    if (!body.name || !body.workspaceId) {
+      return NextResponse.json(
+        { error: 'Nome e workspaceId são obrigatórios' },
+        { status: 400 }
+      );
+    }
+
+    const category = await prisma.category.create({
+      data: {
+        name: body.name.trim(),
+        type: body.type === 'INCOME' ? 'INCOME' : 'EXPENSE',
+        icon: body.icon || 'Tag',
+        color: body.color || '#10b981',
+        workspaceId: body.workspaceId,
+      },
+      include: {
+        subcategories: true,
+      },
+    });
+
+    return NextResponse.json(category);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Erro ao criar categoria';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    await ensureNeonAwake();
+    const id = searchParams.get('id');
+    if (!id) {
+      return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
+    }
+
+    await prisma.category.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Erro ao remover categoria';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+

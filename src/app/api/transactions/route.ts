@@ -29,6 +29,15 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const safeCategoryId =
+      body.categoryId && !String(body.categoryId).startsWith('cat-')
+        ? body.categoryId
+        : undefined;
+    const safeCostCenterId =
+      body.costCenterId && !String(body.costCenterId).startsWith('cc-')
+        ? body.costCenterId
+        : undefined;
+
     const transaction = await prisma.transaction.create({
       data: {
         type: body.type,
@@ -49,9 +58,9 @@ export async function POST(req: Request) {
         linkedTransactionId: body.linkedTransactionId,
         workspaceId: body.workspaceId,
         accountId: body.accountId,
-        targetAccountId: body.targetAccountId,
-        categoryId: body.categoryId,
-        costCenterId: body.costCenterId,
+        targetAccountId: body.targetAccountId || undefined,
+        categoryId: safeCategoryId,
+        costCenterId: safeCostCenterId,
       },
     });
 
@@ -82,6 +91,124 @@ export async function POST(req: Request) {
     return NextResponse.json(transaction);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Erro ao criar transação';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    await ensureNeonAwake();
+
+    const { id, ...updates } = body;
+    if (!id) {
+      return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
+    }
+
+    const existing = await prisma.transaction.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Transação não encontrada' }, { status: 404 });
+    }
+
+    // Reverter impacto anterior no saldo
+    if (existing.type === 'INCOME') {
+      await prisma.account.update({
+        where: { id: existing.accountId },
+        data: { currentBalance: { decrement: existing.amount } },
+      });
+    } else if (existing.type === 'EXPENSE') {
+      await prisma.account.update({
+        where: { id: existing.accountId },
+        data: { currentBalance: { increment: existing.amount } },
+      });
+    } else if (existing.type === 'TRANSFER') {
+      await prisma.account.update({
+        where: { id: existing.accountId },
+        data: { currentBalance: { increment: existing.amount } },
+      });
+      if (existing.targetAccountId) {
+        await prisma.account.update({
+          where: { id: existing.targetAccountId },
+          data: { currentBalance: { decrement: existing.amount } },
+        });
+      }
+    }
+
+    const safeCategoryId =
+      updates.categoryId !== undefined
+        ? updates.categoryId && !String(updates.categoryId).startsWith('cat-')
+          ? updates.categoryId
+          : null
+        : existing.categoryId;
+    const safeCostCenterId =
+      updates.costCenterId !== undefined
+        ? updates.costCenterId && !String(updates.costCenterId).startsWith('cc-')
+          ? updates.costCenterId
+          : null
+        : existing.costCenterId;
+
+    const newType = updates.type ?? existing.type;
+    const newAmount = updates.amount !== undefined ? Number(updates.amount) : existing.amount;
+    const newAccountId = updates.accountId ?? existing.accountId;
+    const newTargetAccountId =
+      newType === 'TRANSFER' ? updates.targetAccountId ?? existing.targetAccountId : null;
+
+    const updated = await prisma.transaction.update({
+      where: { id },
+      data: {
+        type: newType,
+        description: updates.description ?? existing.description,
+        amount: newAmount,
+        date: updates.date ? new Date(updates.date) : existing.date,
+        status: updates.status ?? existing.status,
+        paymentMethod: updates.paymentMethod ?? existing.paymentMethod,
+        currency: updates.currency ?? existing.currency,
+        exchangeRate: updates.exchangeRate ?? existing.exchangeRate,
+        notes: updates.notes !== undefined ? updates.notes : existing.notes,
+        tags: updates.tags ?? existing.tags,
+        isInstallment:
+          updates.isInstallment !== undefined ? Boolean(updates.isInstallment) : existing.isInstallment,
+        installmentNumber:
+          updates.installmentNumber !== undefined ? updates.installmentNumber : existing.installmentNumber,
+        totalInstallments:
+          updates.totalInstallments !== undefined ? updates.totalInstallments : existing.totalInstallments,
+        isRecurring:
+          updates.isRecurring !== undefined ? Boolean(updates.isRecurring) : existing.isRecurring,
+        recurrenceFrequency: updates.recurrenceFrequency ?? existing.recurrenceFrequency,
+        accountId: newAccountId,
+        targetAccountId: newTargetAccountId,
+        categoryId: safeCategoryId,
+        costCenterId: safeCostCenterId,
+      },
+    });
+
+    // Aplicar novo impacto no saldo
+    if (newType === 'INCOME') {
+      await prisma.account.update({
+        where: { id: newAccountId },
+        data: { currentBalance: { increment: newAmount } },
+      });
+    } else if (newType === 'EXPENSE') {
+      await prisma.account.update({
+        where: { id: newAccountId },
+        data: { currentBalance: { decrement: newAmount } },
+      });
+    } else if (newType === 'TRANSFER') {
+      await prisma.account.update({
+        where: { id: newAccountId },
+        data: { currentBalance: { decrement: newAmount } },
+      });
+      if (newTargetAccountId) {
+        await prisma.account.update({
+          where: { id: newTargetAccountId },
+          data: { currentBalance: { increment: newAmount } },
+        });
+      }
+    }
+
+    return NextResponse.json(updated);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Erro ao atualizar transação';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

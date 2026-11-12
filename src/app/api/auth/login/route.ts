@@ -22,6 +22,8 @@ export async function POST(req: Request) {
               workspace: {
                 include: {
                   accounts: true,
+                  categories: true,
+                  costCenters: true,
                 },
               },
             },
