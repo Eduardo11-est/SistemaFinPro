@@ -1,40 +1,75 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useFinance } from '@/lib/store';
 import { AuthScreen } from '@/components/auth/AuthScreen';
 import { Navbar } from '@/components/layout/Navbar';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { KpiCards } from '@/components/dashboard/KpiCards';
 import { CashDeficitAlert } from '@/components/dashboard/CashDeficitAlert';
-import { CashFlowChart } from '@/components/dashboard/CashFlowChart';
-import { ExpenseDonut } from '@/components/dashboard/ExpenseDonut';
 import { UpcomingBillsCard } from '@/components/dashboard/UpcomingBillsCard';
 import { RecentTransactionsCard } from '@/components/dashboard/RecentTransactionsCard';
-import { TransactionListView } from '@/components/transactions/TransactionListView';
-import { AccountsView } from '@/components/accounts/AccountsView';
-import { PayablesReceivablesView } from '@/components/payables/PayablesReceivablesView';
-import { ReconciliationView } from '@/components/reconciliation/ReconciliationView';
-import { BudgetsAndGoalsView } from '@/components/budgets/BudgetsAndGoalsView';
-import { ReportsView } from '@/components/reports/ReportsView';
-import { SettingsAndNeonView } from '@/components/settings/SettingsAndNeonView';
-import { TransactionModal } from '@/components/transactions/TransactionModal';
 import {
   LayoutDashboard,
   ArrowLeftRight,
-  Wallet,
   CalendarDays,
   BarChart3,
-  Plus
+  Plus,
 } from 'lucide-react';
+
+// Code-splitting (Lazy Loading) para gráficos pesados e abas secundárias
+const CashFlowChart = dynamic(
+  () => import('@/components/dashboard/CashFlowChart').then((m) => m.CashFlowChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-80 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 animate-pulse p-5" />
+    ),
+  }
+);
+
+const ExpenseDonut = dynamic(
+  () => import('@/components/dashboard/ExpenseDonut').then((m) => m.ExpenseDonut),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-80 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 animate-pulse p-5" />
+    ),
+  }
+);
+
+const TransactionListView = dynamic(
+  () => import('@/components/transactions/TransactionListView').then((m) => m.TransactionListView)
+);
+const AccountsView = dynamic(
+  () => import('@/components/accounts/AccountsView').then((m) => m.AccountsView)
+);
+const PayablesReceivablesView = dynamic(
+  () =>
+    import('@/components/payables/PayablesReceivablesView').then((m) => m.PayablesReceivablesView)
+);
+const BudgetsAndGoalsView = dynamic(
+  () => import('@/components/budgets/BudgetsAndGoalsView').then((m) => m.BudgetsAndGoalsView)
+);
+const ReportsView = dynamic(
+  () => import('@/components/reports/ReportsView').then((m) => m.ReportsView)
+);
+const SettingsAndNeonView = dynamic(
+  () => import('@/components/settings/SettingsAndNeonView').then((m) => m.SettingsAndNeonView)
+);
+const TransactionModal = dynamic(
+  () => import('@/components/transactions/TransactionModal').then((m) => m.TransactionModal)
+);
 
 export default function HomePage() {
   const {
     activeView,
     setActiveView,
+    isNewTransactionModalOpen,
     setIsNewTransactionModalOpen,
     currentUser,
-    isAuthLoading
+    isAuthLoading,
   } = useFinance();
 
   // Keyboard shortcut: Press 'N' or 'n' to open transaction modal
@@ -110,7 +145,6 @@ export default function HomePage() {
           {activeView === 'transactions' && <TransactionListView />}
           {activeView === 'accounts' && <AccountsView />}
           {activeView === 'payables' && <PayablesReceivablesView />}
-          {activeView === 'reconciliation' && <ReconciliationView />}
           {activeView === 'budgets' && <BudgetsAndGoalsView />}
           {activeView === 'reports' && <ReportsView />}
           {activeView === 'settings' && <SettingsAndNeonView />}
@@ -163,8 +197,8 @@ export default function HomePage() {
         </button>
       </div>
 
-      {/* Modal Global de Lançamentos */}
-      <TransactionModal />
+      {/* Modal Global de Lançamentos (montado sob demanda) */}
+      {isNewTransactionModalOpen && <TransactionModal />}
     </div>
   );
 }

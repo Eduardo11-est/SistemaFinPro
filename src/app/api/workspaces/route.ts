@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { sanitizeText, getSafeErrorMessage } from '@/lib/security';
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const userId = searchParams.get('userId');
+    const userId = sanitizeText(searchParams.get('userId'), 100);
 
-    const where = userId
-      ? { members: { some: { userId } } }
-      : {};
+    const where = userId ? { members: { some: { userId } } } : {};
 
     const workspaces = await prisma.workspace.findMany({
       where,
@@ -22,8 +21,10 @@ export async function GET(req: Request) {
     });
     return NextResponse.json(workspaces);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao listar workspaces';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao listar workspaces') },
+      { status: 500 }
+    );
   }
 }
 
@@ -31,20 +32,26 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     await ensureNeonAwake();
-    const wsType = body.type || 'CORPORATE';
+
+    const cleanName = sanitizeText(body.name, 100);
+    if (!cleanName) {
+      return NextResponse.json({ error: 'Nome do workspace é obrigatório' }, { status: 400 });
+    }
+
+    const wsType = body.type === 'PERSONAL' ? 'PERSONAL' : 'CORPORATE';
     const workspace = await prisma.workspace.create({
       data: {
-        name: body.name,
+        name: cleanName,
         type: wsType,
-        document: body.document,
-        legalName: body.legalName,
+        document: sanitizeText(body.document, 30) || undefined,
+        legalName: sanitizeText(body.legalName, 140) || undefined,
         defaultCurrency: body.defaultCurrency || 'BRL',
-        colorTheme: body.colorTheme || '#6366f1',
+        colorTheme: sanitizeText(body.colorTheme, 20) || '#6366f1',
         ...(body.userId
           ? {
               members: {
                 create: {
-                  userId: body.userId,
+                  userId: String(body.userId),
                   role: 'OWNER',
                 },
               },
@@ -52,13 +59,16 @@ export async function POST(req: Request) {
           : {}),
         accounts: {
           create: {
-            name: wsType === 'CORPORATE' ? 'Conta Empresarial Principal' : 'Conta Corrente Principal',
+            name:
+              wsType === 'CORPORATE'
+                ? 'Conta Empresarial Principal'
+                : 'Conta Corrente Principal',
             type: 'CHECKING',
             bankName: 'Meu Banco',
             currency: body.defaultCurrency || 'BRL',
             initialBalance: 0,
             currentBalance: 0,
-            color: body.colorTheme || '#6366f1',
+            color: sanitizeText(body.colorTheme, 20) || '#6366f1',
           },
         },
         categories: {
@@ -95,7 +105,9 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(workspace);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao criar workspace';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao criar workspace') },
+      { status: 500 }
+    );
   }
 }

@@ -19,8 +19,6 @@ import {
   PayableReceivable,
   Budget,
   Goal,
-  BankStatementItem,
-  ReconciliationRule,
   CurrencyType,
   ExchangeRates,
 } from '@/types/finance';
@@ -33,8 +31,6 @@ import {
   INITIAL_PAYABLES_RECEIVABLES,
   INITIAL_BUDGETS,
   INITIAL_GOALS,
-  INITIAL_STATEMENTS,
-  INITIAL_RECONCILIATION_RULES,
 } from './mock-data';
 
 interface FinanceContextType {
@@ -106,12 +102,6 @@ interface FinanceContextType {
   goals: Goal[];
   addGoal: (goal: Omit<Goal, 'id'>) => void;
   contributeToGoal: (id: string, amount: number) => void;
-
-  // Bank Reconciliation
-  statements: BankStatementItem[];
-  reconcileItem: (statementId: string, transactionId?: string) => void;
-  addStatementItems: (items: BankStatementItem[]) => void;
-  reconciliationRules: ReconciliationRule[];
 
   // Modals & UI States
   isNewTransactionModalOpen: boolean;
@@ -201,8 +191,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [payablesReceivables, setPayablesReceivables] = useState<PayableReceivable[]>(INITIAL_PAYABLES_RECEIVABLES);
   const [budgets] = useState<Budget[]>(INITIAL_BUDGETS);
   const [goals, setGoals] = useState<Goal[]>(INITIAL_GOALS);
-  const [statements, setStatements] = useState<BankStatementItem[]>(INITIAL_STATEMENTS);
-  const [reconciliationRules] = useState<ReconciliationRule[]>(INITIAL_RECONCILIATION_RULES);
 
   // Salary per workspace
   const [salariesByWorkspace, setSalariesByWorkspace] = useState<Record<string, number>>({});
@@ -544,6 +532,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     setCurrentUser(null);
     syncedCategoryWorkspacesRef.current.clear();
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     try {
       localStorage.removeItem(`${STORAGE_KEY_PREFIX}user`);
       localStorage.removeItem(`${STORAGE_KEY_PREFIX}ws`);
@@ -1094,19 +1083,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  // Bank Reconciliation
-  const reconcileItem = useCallback((statementId: string, transactionId?: string) => {
-    setStatements((prev) =>
-      prev.map((s) =>
-        s.id === statementId ? { ...s, isReconciled: true, matchedTransactionId: transactionId } : s
-      )
-    );
-  }, []);
-
-  const addStatementItems = useCallback((items: BankStatementItem[]) => {
-    setStatements((prev) => [...items, ...prev]);
-  }, []);
-
   // Compute stats and KPIs
   const stats = useMemo(() => {
     const totalBalance = currentAccounts.reduce((acc, account) => {
@@ -1224,11 +1200,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       contributeToGoal,
 
-      statements,
-      reconcileItem,
-      addStatementItems,
-      reconciliationRules,
-
       isNewTransactionModalOpen,
       setIsNewTransactionModalOpen: handleSetModalOpen,
       activeView,
@@ -1283,10 +1254,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       currentGoals,
       addGoal,
       contributeToGoal,
-      statements,
-      reconcileItem,
-      addStatementItems,
-      reconciliationRules,
       isNewTransactionModalOpen,
       handleSetModalOpen,
       activeView,

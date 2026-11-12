@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { sanitizeText, getSafeErrorMessage } from '@/lib/security';
 
 const DEFAULT_PERSONAL_CATEGORIES = [
   { name: 'Salário / Renda Principal', type: 'INCOME' as const, icon: 'Briefcase', color: '#10b981' },
@@ -23,7 +24,7 @@ const DEFAULT_CORPORATE_CATEGORIES = [
   { name: 'Impostos & Taxas (DAS / ISS / IRPJ)', type: 'EXPENSE' as const, icon: 'FileText', color: '#ef4444' },
   { name: 'Infraestrutura & Cloud / SaaS', type: 'EXPENSE' as const, icon: 'Server', color: '#0ea5e9' },
   { name: 'Marketing & Aquisição (Ads)', type: 'EXPENSE' as const, icon: 'Megaphone', color: '#f97316' },
-  { name: ' Administrativo & Contabilidade', type: 'EXPENSE' as const, icon: 'Building', color: '#f59e0b' },
+  { name: 'Administrativo & Contabilidade', type: 'EXPENSE' as const, icon: 'Building', color: '#f59e0b' },
   { name: 'Fornecedores & Operação', type: 'EXPENSE' as const, icon: 'Truck', color: '#8b5cf6' },
   { name: 'Despesas Bancárias & Tarifas', type: 'EXPENSE' as const, icon: 'CreditCard', color: '#64748b' },
 ];
@@ -43,24 +44,21 @@ export async function GET(req: Request) {
       orderBy: { name: 'asc' },
     });
 
-    // Se um workspace específico foi consultado e não possui categorias no banco,
-    // popula automaticamente com as categorias padrão ativas daquele contexto.
+    // Provisionamento em lote (createMany) caso o workspace consultado não possua categorias no banco
     if (workspaceId && categories.length === 0) {
       const ws = await prisma.workspace.findUnique({ where: { id: workspaceId } });
       if (ws) {
         const defaults =
           ws.type === 'CORPORATE' ? DEFAULT_CORPORATE_CATEGORIES : DEFAULT_PERSONAL_CATEGORIES;
-        for (const cat of defaults) {
-          await prisma.category.create({
-            data: {
-              name: cat.name.trim(),
-              type: cat.type,
-              icon: cat.icon,
-              color: cat.color,
-              workspaceId: ws.id,
-            },
-          });
-        }
+        await prisma.category.createMany({
+          data: defaults.map((cat) => ({
+            name: cat.name,
+            type: cat.type,
+            icon: cat.icon,
+            color: cat.color,
+            workspaceId: ws.id,
+          })),
+        });
         categories = await prisma.category.findMany({
           where: { workspaceId },
           include: { subcategories: true },
@@ -71,8 +69,10 @@ export async function GET(req: Request) {
 
     return NextResponse.json(categories);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao listar categorias';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao listar categorias') },
+      { status: 500 }
+    );
   }
 }
 
@@ -81,7 +81,10 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
-    if (!body.name || !body.workspaceId) {
+    const cleanName = sanitizeText(body.name, 80);
+    const workspaceId = sanitizeText(body.workspaceId, 100);
+
+    if (!cleanName || !workspaceId) {
       return NextResponse.json(
         { error: 'Nome e workspaceId são obrigatórios' },
         { status: 400 }
@@ -90,11 +93,11 @@ export async function POST(req: Request) {
 
     const category = await prisma.category.create({
       data: {
-        name: body.name.trim(),
+        name: cleanName,
         type: body.type === 'INCOME' ? 'INCOME' : 'EXPENSE',
-        icon: body.icon || 'Tag',
-        color: body.color || '#10b981',
-        workspaceId: body.workspaceId,
+        icon: sanitizeText(body.icon, 40) || 'Tag',
+        color: sanitizeText(body.color, 20) || '#10b981',
+        workspaceId,
       },
       include: {
         subcategories: true,
@@ -103,8 +106,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json(category);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao criar categoria';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao criar categoria') },
+      { status: 500 }
+    );
   }
 }
 
@@ -112,7 +117,7 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const id = searchParams.get('id');
+    const id = sanitizeText(searchParams.get('id'), 100);
     if (!id) {
       return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
     }
@@ -120,8 +125,9 @@ export async function DELETE(req: Request) {
     await prisma.category.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao remover categoria';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao remover categoria') },
+      { status: 500 }
+    );
   }
 }
-

@@ -1,20 +1,15 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useFinance } from '@/lib/store';
 import {
   LayoutDashboard,
   ArrowLeftRight,
   Wallet,
   CalendarDays,
-  FileCheck2,
   PieChart,
   BarChart3,
   Database,
-  Building,
-  User,
-  ExternalLink,
-  Sliders
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -22,60 +17,57 @@ interface SidebarProps {
   setActiveView: (view: string) => void;
 }
 
-export function Sidebar({ activeView, setActiveView }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }: SidebarProps) {
   const { currentWorkspace } = useFinance();
   const isPersonal = currentWorkspace.type === 'PERSONAL';
 
-  const menuItems = [
-    {
-      id: 'dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      badge: null,
-    },
-    {
-      id: 'transactions',
-      label: 'Transações',
-      icon: ArrowLeftRight,
-      badge: null,
-    },
-    {
-      id: 'accounts',
-      label: 'Contas & Cartões',
-      icon: Wallet,
-      badge: null,
-    },
-    {
-      id: 'payables',
-      label: 'A Pagar & Receber',
-      icon: CalendarDays,
-      badge: 'Calendário',
-    },
-    {
-      id: 'reconciliation',
-      label: 'Conciliação Bancária',
-      icon: FileCheck2,
-      badge: 'OFX/CSV',
-    },
-    {
-      id: 'budgets',
-      label: isPersonal ? 'Orçamento & Metas' : 'Orçamento & Centros',
-      icon: PieChart,
-      badge: null,
-    },
-    {
-      id: 'reports',
-      label: isPersonal ? 'Relatórios & Fluxo' : 'DRE & Relatórios PJ',
-      icon: BarChart3,
-      badge: isPersonal ? null : 'DRE',
-    },
-    {
-      id: 'settings',
-      label: 'Neon DB & Config',
-      icon: Database,
-      badge: 'Neon',
-    },
-  ];
+  const menuItems = useMemo(
+    () => [
+      {
+        id: 'dashboard',
+        label: 'Dashboard',
+        icon: LayoutDashboard,
+        badge: null,
+      },
+      {
+        id: 'transactions',
+        label: 'Transações',
+        icon: ArrowLeftRight,
+        badge: null,
+      },
+      {
+        id: 'accounts',
+        label: 'Contas & Cartões',
+        icon: Wallet,
+        badge: null,
+      },
+      {
+        id: 'payables',
+        label: 'A Pagar & Receber',
+        icon: CalendarDays,
+        badge: 'Calendário',
+      },
+      {
+        id: 'budgets',
+        label: isPersonal ? 'Orçamento & Metas' : 'Orçamento & Centros',
+        icon: PieChart,
+        badge: null,
+      },
+      {
+        id: 'reports',
+        label: isPersonal ? 'Relatórios & Fluxo' : 'DRE & Relatórios PJ',
+        icon: BarChart3,
+        badge: isPersonal ? null : 'DRE',
+      },
+      {
+        id: 'settings',
+        label: 'Neon DB & Config',
+        icon: Database,
+        badge: 'Neon',
+      },
+    ],
+    [isPersonal]
+  );
 
   return (
     <aside className="w-64 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm hidden md:flex flex-col justify-between p-4 min-h-[calc(100vh-4rem)]">
@@ -92,16 +84,16 @@ export function Sidebar({ activeView, setActiveView }: SidebarProps) {
           <div className="flex items-center gap-2 mb-1">
             <span
               className={`w-2 h-2 rounded-full ${
-                isPersonal ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-indigo-500 shadow-sm shadow-indigo-500/50'
+                isPersonal
+                  ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
+                  : 'bg-indigo-500 shadow-sm shadow-indigo-500/50'
               }`}
             />
             <span className="text-[10px] font-bold uppercase tracking-wider">
               {isPersonal ? 'Modo Finanças Pessoais' : 'Modo Gestão Corporativa'}
             </span>
           </div>
-          <div className="font-semibold text-xs truncate">
-            {currentWorkspace.name}
-          </div>
+          <div className="font-semibold text-xs truncate">{currentWorkspace.name}</div>
           <div className="text-[10px] opacity-75 font-mono">
             {currentWorkspace.document || (isPersonal ? 'CPF' : 'CNPJ')}
           </div>
@@ -142,7 +134,7 @@ export function Sidebar({ activeView, setActiveView }: SidebarProps) {
 
       {/* Rodapé da Sidebar: Status do Banco de Dados Neon */}
       <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
-        <div 
+        <div
           onClick={() => setActiveView('settings')}
           className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer group"
         >
@@ -166,9 +158,9 @@ export function Sidebar({ activeView, setActiveView }: SidebarProps) {
         </div>
 
         <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-          FinPro © 2026 • Modo Seguro 2FA
+          FinPro © 2026 • Segurança PBKDF2 & HTTPS
         </div>
       </div>
     </aside>
   );
-}
+});

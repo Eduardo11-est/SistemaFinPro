@@ -11,50 +11,51 @@ import {
   ResponsiveContainer,
   Bar,
   Line,
-  ComposedChart
+  ComposedChart,
 } from 'recharts';
 import { TrendingUp } from 'lucide-react';
 
-export function CashFlowChart() {
-  const { transactions, formatMoney, activeCurrency, convertAmount } = useFinance();
+const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+export const CashFlowChart = React.memo(function CashFlowChart() {
+  const { transactions, formatMoney, activeCurrency, convertAmount, currentMonthPrefix } =
+    useFinance();
   const [period, setPeriod] = useState<'6M' | '30D'>('6M');
 
-  // Generate 6 months data aggregation from real transactions
+  // Agrega os últimos 6 meses com apenas uma única passagem (O(N)) sobre as transações
   const chartData = useMemo(() => {
-    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const now = new Date();
-    const result = [];
+    const [baseYear, baseMonth] = currentMonthPrefix.split('-').map(Number);
+    const buckets = new Map<string, { label: string; receitas: number; despesas: number }>();
 
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const year = d.getFullYear();
-      const month = d.getMonth();
-      const label = i === 0 ? `${monthNames[month]} (Atual)` : monthNames[month];
-
-      let receitas = 0;
-      let despesas = 0;
-
-      transactions.forEach((tx) => {
-        if (tx.status === 'COMPLETED') {
-          const txDate = new Date(tx.date);
-          if (txDate.getFullYear() === year && txDate.getMonth() === month) {
-            const val = convertAmount(tx.amount, tx.currency, activeCurrency);
-            if (tx.type === 'INCOME') receitas += val;
-            if (tx.type === 'EXPENSE') despesas += val;
-          }
-        }
-      });
-
-      result.push({
-        name: label,
-        receitas: Math.round(receitas),
-        despesas: Math.round(despesas),
-        saldo: Math.round(receitas - despesas),
-      });
+      const d = new Date(baseYear, baseMonth - 1 - i, 1);
+      const y = d.getFullYear();
+      const m = d.getMonth();
+      const key = `${y}-${String(m + 1).padStart(2, '0')}`;
+      const label = i === 0 ? `${MONTH_NAMES[m]} (Atual)` : MONTH_NAMES[m];
+      buckets.set(key, { label, receitas: 0, despesas: 0 });
     }
 
-    return result;
-  }, [transactions, convertAmount, activeCurrency]);
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
+      if (tx.status === 'COMPLETED' && tx.date) {
+        const prefix = tx.date.slice(0, 7);
+        const bucket = buckets.get(prefix);
+        if (bucket) {
+          const val = convertAmount(tx.amount, tx.currency, activeCurrency);
+          if (tx.type === 'INCOME') bucket.receitas += val;
+          else if (tx.type === 'EXPENSE') bucket.despesas += val;
+        }
+      }
+    }
+
+    return Array.from(buckets.values()).map((b) => ({
+      name: b.label,
+      receitas: Math.round(b.receitas),
+      despesas: Math.round(b.despesas),
+      saldo: Math.round(b.receitas - b.despesas),
+    }));
+  }, [transactions, convertAmount, activeCurrency, currentMonthPrefix]);
 
   return (
     <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
@@ -73,7 +74,9 @@ export function CashFlowChart() {
           <button
             onClick={() => setPeriod('6M')}
             className={`px-2.5 py-1 rounded-md transition-all ${
-              period === '6M' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500'
+              period === '6M'
+                ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white'
+                : 'text-slate-500'
             }`}
           >
             Últimos 6 Meses
@@ -86,7 +89,14 @@ export function CashFlowChart() {
           <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} />
-            <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} tickFormatter={(val) => `R$${val >= 1000 ? (val/1000).toFixed(0)+'k' : val}`} />
+            <YAxis
+              stroke="#94a3b8"
+              fontSize={11}
+              tickLine={false}
+              tickFormatter={(val) =>
+                `R$${val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val}`
+              }
+            />
             <Tooltip
               content={({ active, payload }) => {
                 if (active && payload && payload.length) {
@@ -108,18 +118,25 @@ export function CashFlowChart() {
                 return null;
               }}
             />
-            <Legend 
-              verticalAlign="top" 
-              align="right" 
-              iconType="circle" 
-              wrapperStyle={{ paddingBottom: '12px', fontSize: '11px' }} 
+            <Legend
+              verticalAlign="top"
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ paddingBottom: '12px', fontSize: '11px' }}
             />
             <Bar dataKey="receitas" name="Receitas" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={36} />
             <Bar dataKey="despesas" name="Despesas" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={36} />
-            <Line type="monotone" dataKey="saldo" name="Saldo Líquido" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} />
+            <Line
+              type="monotone"
+              dataKey="saldo"
+              name="Saldo Líquido"
+              stroke="#6366f1"
+              strokeWidth={2.5}
+              dot={{ r: 3 }}
+            />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>
   );
-}
+});

@@ -4,17 +4,29 @@ import React, { useMemo } from 'react';
 import { useFinance } from '@/lib/store';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { PieChart as PieIcon } from 'lucide-react';
+import { Category } from '@/types/finance';
 
-export function ExpenseDonut() {
+const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#6366f1'];
+
+export const ExpenseDonut = React.memo(function ExpenseDonut() {
   const { transactions, categories, formatMoney, activeCurrency, convertAmount } = useFinance();
+
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, Category>();
+    for (let i = 0; i < categories.length; i++) {
+      map.set(categories[i].id, categories[i]);
+    }
+    return map;
+  }, [categories]);
 
   const expenseData = useMemo(() => {
     const categoryTotals: Record<string, { name: string; amount: number; color: string }> = {};
 
-    transactions.forEach((tx) => {
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
       if (tx.type === 'EXPENSE' && tx.status === 'COMPLETED') {
         const catId = tx.categoryId || 'outros';
-        const cat = categories.find((c) => c.id === catId);
+        const cat = categoryMap.get(catId);
         const catName = cat?.name || 'Outras Despesas';
         const catColor = cat?.color || '#94a3b8';
         const converted = convertAmount(tx.amount, tx.currency, activeCurrency);
@@ -24,7 +36,7 @@ export function ExpenseDonut() {
         }
         categoryTotals[catId].amount += converted;
       }
-    });
+    }
 
     const list = Object.values(categoryTotals);
     const total = list.reduce((acc, curr) => acc + curr.amount, 0);
@@ -35,9 +47,7 @@ export function ExpenseDonut() {
         percentage: total > 0 ? ((item.amount / total) * 100).toFixed(1) : '0',
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [transactions, categories, convertAmount, activeCurrency]);
-
-  const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#6366f1'];
+  }, [transactions, categoryMap, convertAmount, activeCurrency]);
 
   return (
     <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
@@ -47,7 +57,7 @@ export function ExpenseDonut() {
           <span>Distribuição de Despesas</span>
         </h3>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Concentração de saídas por categoria no mês
+          Concentração de saídas por categoria
         </p>
       </div>
 
@@ -71,7 +81,10 @@ export function ExpenseDonut() {
                   dataKey="amount"
                 >
                   {expenseData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.color || COLORS[index % COLORS.length]}
+                    />
                   ))}
                 </Pie>
                 <Tooltip
@@ -96,7 +109,10 @@ export function ExpenseDonut() {
           {/* Legenda Customizada com Percentuais */}
           <div className="flex-1 w-full space-y-2 max-h-56 overflow-y-auto pr-1">
             {expenseData.map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+              <div
+                key={idx}
+                className="flex items-center justify-between text-xs py-1 border-b border-slate-100 dark:border-slate-800/60 last:border-0"
+              >
                 <div className="flex items-center gap-2 truncate max-w-[150px]">
                   <span
                     className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -121,4 +137,4 @@ export function ExpenseDonut() {
       )}
     </div>
   );
-}
+});

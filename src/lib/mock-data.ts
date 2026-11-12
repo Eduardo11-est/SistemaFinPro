@@ -6,9 +6,7 @@ import {
   Transaction, 
   PayableReceivable, 
   Budget, 
-  Goal, 
-  BankStatementItem, 
-  ReconciliationRule 
+  Goal
 } from '@/types/finance';
 
 export const INITIAL_WORKSPACES: Workspace[] = [
@@ -60,7 +58,3 @@ export const INITIAL_PAYABLES_RECEIVABLES: PayableReceivable[] = [];
 export const INITIAL_BUDGETS: Budget[] = [];
 
 export const INITIAL_GOALS: Goal[] = [];
-
-export const INITIAL_STATEMENTS: BankStatementItem[] = [];
-
-export const INITIAL_RECONCILIATION_RULES: ReconciliationRule[] = [];

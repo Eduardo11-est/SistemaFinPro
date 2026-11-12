@@ -1,13 +1,22 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useFinance } from '@/lib/store';
-import { ArrowUpRight, ArrowDownRight, ArrowLeftRight, Tag, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, ArrowLeftRight, ArrowRight } from 'lucide-react';
+import { Account } from '@/types/finance';
 
-export function RecentTransactionsCard() {
+export const RecentTransactionsCard = React.memo(function RecentTransactionsCard() {
   const { transactions, accounts, formatMoney, setActiveView } = useFinance();
 
-  const recent = transactions.slice(0, 6);
+  const recent = useMemo(() => transactions.slice(0, 6), [transactions]);
+
+  const accountMap = useMemo(() => {
+    const map = new Map<string, Account>();
+    for (let i = 0; i < accounts.length; i++) {
+      map.set(accounts[i].id, accounts[i]);
+    }
+    return map;
+  }, [accounts]);
 
   return (
     <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
@@ -39,7 +48,7 @@ export function RecentTransactionsCard() {
           recent.map((tx) => {
             const isIncome = tx.type === 'INCOME';
             const isTransfer = tx.type === 'TRANSFER';
-            const account = accounts.find((a) => a.id === tx.accountId);
+            const account = accountMap.get(tx.accountId);
             const isProLabore = tx.tags?.includes('pro-labore');
 
             return (
@@ -82,9 +91,11 @@ export function RecentTransactionsCard() {
                       )}
                     </div>
                     <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                      <span>{new Date(tx.date).toLocaleDateString('pt-BR')}</span>
+                      <span>{tx.date ? tx.date.split('T')[0].split('-').reverse().join('/') : ''}</span>
                       <span>•</span>
-                      <span className="truncate max-w-[120px]">{account?.name || 'Conta Corrente'}</span>
+                      <span className="truncate max-w-[120px]">
+                        {account?.name || 'Conta Corrente'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -115,4 +126,4 @@ export function RecentTransactionsCard() {
       </div>
     </div>
   );
-}
+});

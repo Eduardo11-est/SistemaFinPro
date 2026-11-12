@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { sanitizeText, sanitizePositiveAmount, getSafeErrorMessage } from '@/lib/security';
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const workspaceId = searchParams.get('workspaceId');
+    const workspaceId = sanitizeText(searchParams.get('workspaceId'), 100);
     const where = workspaceId ? { workspaceId } : {};
 
     const accounts = await prisma.account.findMany({
@@ -14,8 +15,10 @@ export async function GET(req: Request) {
     });
     return NextResponse.json(accounts);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao listar contas';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao listar contas') },
+      { status: 500 }
+    );
   }
 }
 
@@ -23,24 +26,44 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     await ensureNeonAwake();
+
+    const cleanName = sanitizeText(body.name, 100);
+    const workspaceId = sanitizeText(body.workspaceId, 100);
+
+    if (!cleanName || !workspaceId) {
+      return NextResponse.json(
+        { error: 'Nome da conta e workspaceId são obrigatórios' },
+        { status: 400 }
+      );
+    }
+
+    const initialBal = Number.isFinite(Number(body.initialBalance))
+      ? Number(body.initialBalance)
+      : 0;
+    const currentBal = Number.isFinite(Number(body.currentBalance))
+      ? Number(body.currentBalance)
+      : initialBal;
+
     const account = await prisma.account.create({
       data: {
-        name: body.name,
-        type: body.type,
-        bankName: body.bankName,
+        name: cleanName,
+        type: body.type || 'CHECKING',
+        bankName: sanitizeText(body.bankName, 80) || undefined,
         currency: body.currency || 'BRL',
-        initialBalance: body.initialBalance || 0,
-        currentBalance: body.currentBalance || body.initialBalance || 0,
-        creditLimit: body.creditLimit,
-        closingDay: body.closingDay,
-        dueDay: body.dueDay,
-        color: body.color || '#3b82f6',
-        workspaceId: body.workspaceId,
+        initialBalance: initialBal,
+        currentBalance: currentBal,
+        creditLimit: sanitizePositiveAmount(body.creditLimit, true) ?? undefined,
+        closingDay: body.closingDay ? Number(body.closingDay) : undefined,
+        dueDay: body.dueDay ? Number(body.dueDay) : undefined,
+        color: sanitizeText(body.color, 20) || '#3b82f6',
+        workspaceId,
       },
     });
     return NextResponse.json(account);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao criar conta';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao criar conta') },
+      { status: 500 }
+    );
   }
 }

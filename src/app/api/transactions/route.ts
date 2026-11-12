@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { sanitizeText, sanitizePositiveAmount, getSafeErrorMessage } from '@/lib/security';
+
+const VALID_TYPES = new Set(['INCOME', 'EXPENSE', 'TRANSFER']);
+const VALID_CURRENCIES = new Set(['BRL', 'USD', 'EUR']);
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const workspaceId = searchParams.get('workspaceId');
+    const workspaceId = sanitizeText(searchParams.get('workspaceId'), 100);
 
     const where = workspaceId ? { workspaceId } : {};
     const transactions = await prisma.transaction.findMany({
@@ -19,8 +23,10 @@ export async function GET(req: Request) {
     });
     return NextResponse.json(transactions);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao listar transações';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao listar transações') },
+      { status: 500 }
+    );
   }
 }
 
@@ -29,69 +35,90 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const cleanDescription = sanitizeText(body.description, 200);
+    const validAmount = sanitizePositiveAmount(body.amount);
+    const txType = VALID_TYPES.has(body.type) ? body.type : 'EXPENSE';
+    const currency = VALID_CURRENCIES.has(body.currency) ? body.currency : 'BRL';
+
+    if (!cleanDescription || validAmount === null || !body.workspaceId || !body.accountId) {
+      return NextResponse.json(
+        { error: 'Dados inválidos para criação de transação.' },
+        { status: 400 }
+      );
+    }
+
     const safeCategoryId =
       body.categoryId && !String(body.categoryId).startsWith('cat-')
-        ? body.categoryId
+        ? String(body.categoryId)
         : undefined;
     const safeCostCenterId =
       body.costCenterId && !String(body.costCenterId).startsWith('cc-')
-        ? body.costCenterId
+        ? String(body.costCenterId)
         : undefined;
+
+    const cleanTags = Array.isArray(body.tags)
+      ? body.tags
+          .map((t: unknown) => sanitizeText(t, 40).toLowerCase())
+          .filter(Boolean)
+          .slice(0, 15)
+      : [];
 
     const transaction = await prisma.transaction.create({
       data: {
-        type: body.type,
-        description: body.description,
-        amount: body.amount,
-        date: new Date(body.date),
+        type: txType,
+        description: cleanDescription,
+        amount: validAmount,
+        date: new Date(body.date || Date.now()),
         status: body.status || 'COMPLETED',
-        paymentMethod: body.paymentMethod,
-        currency: body.currency || 'BRL',
-        exchangeRate: body.exchangeRate || 1,
-        notes: body.notes,
-        tags: body.tags || [],
+        paymentMethod: sanitizeText(body.paymentMethod, 60) || undefined,
+        currency,
+        exchangeRate: sanitizePositiveAmount(body.exchangeRate) || 1,
+        notes: sanitizeText(body.notes, 500) || undefined,
+        tags: cleanTags,
         isInstallment: Boolean(body.isInstallment),
-        installmentNumber: body.installmentNumber,
-        totalInstallments: body.totalInstallments,
+        installmentNumber: body.installmentNumber ? Number(body.installmentNumber) : undefined,
+        totalInstallments: body.totalInstallments ? Number(body.totalInstallments) : undefined,
         isRecurring: Boolean(body.isRecurring),
         recurrenceFrequency: body.recurrenceFrequency || 'NONE',
         linkedTransactionId: body.linkedTransactionId,
-        workspaceId: body.workspaceId,
-        accountId: body.accountId,
-        targetAccountId: body.targetAccountId || undefined,
+        workspaceId: String(body.workspaceId),
+        accountId: String(body.accountId),
+        targetAccountId: body.targetAccountId ? String(body.targetAccountId) : undefined,
         categoryId: safeCategoryId,
         costCenterId: safeCostCenterId,
       },
     });
 
     // Atualizar saldo da conta no Neon
-    if (body.type === 'INCOME') {
+    if (txType === 'INCOME') {
       await prisma.account.update({
-        where: { id: body.accountId },
-        data: { currentBalance: { increment: body.amount } },
+        where: { id: String(body.accountId) },
+        data: { currentBalance: { increment: validAmount } },
       });
-    } else if (body.type === 'EXPENSE') {
+    } else if (txType === 'EXPENSE') {
       await prisma.account.update({
-        where: { id: body.accountId },
-        data: { currentBalance: { decrement: body.amount } },
+        where: { id: String(body.accountId) },
+        data: { currentBalance: { decrement: validAmount } },
       });
-    } else if (body.type === 'TRANSFER') {
+    } else if (txType === 'TRANSFER') {
       await prisma.account.update({
-        where: { id: body.accountId },
-        data: { currentBalance: { decrement: body.amount } },
+        where: { id: String(body.accountId) },
+        data: { currentBalance: { decrement: validAmount } },
       });
       if (body.targetAccountId) {
         await prisma.account.update({
-          where: { id: body.targetAccountId },
-          data: { currentBalance: { increment: body.amount } },
+          where: { id: String(body.targetAccountId) },
+          data: { currentBalance: { increment: validAmount } },
         });
       }
     }
 
     return NextResponse.json(transaction);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao criar transação';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao criar transação') },
+      { status: 500 }
+    );
   }
 }
 
@@ -105,7 +132,7 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
     }
 
-    const existing = await prisma.transaction.findUnique({ where: { id } });
+    const existing = await prisma.transaction.findUnique({ where: { id: String(id) } });
     if (!existing) {
       return NextResponse.json({ error: 'Transação não encontrada' }, { status: 404 });
     }
@@ -137,41 +164,73 @@ export async function PATCH(req: Request) {
     const safeCategoryId =
       updates.categoryId !== undefined
         ? updates.categoryId && !String(updates.categoryId).startsWith('cat-')
-          ? updates.categoryId
+          ? String(updates.categoryId)
           : null
         : existing.categoryId;
     const safeCostCenterId =
       updates.costCenterId !== undefined
         ? updates.costCenterId && !String(updates.costCenterId).startsWith('cc-')
-          ? updates.costCenterId
+          ? String(updates.costCenterId)
           : null
         : existing.costCenterId;
 
-    const newType = updates.type ?? existing.type;
-    const newAmount = updates.amount !== undefined ? Number(updates.amount) : existing.amount;
-    const newAccountId = updates.accountId ?? existing.accountId;
+    const newType = VALID_TYPES.has(updates.type) ? updates.type : existing.type;
+    const newAmount =
+      updates.amount !== undefined
+        ? sanitizePositiveAmount(updates.amount) ?? existing.amount
+        : existing.amount;
+    const newAccountId = updates.accountId ? String(updates.accountId) : existing.accountId;
     const newTargetAccountId =
-      newType === 'TRANSFER' ? updates.targetAccountId ?? existing.targetAccountId : null;
+      newType === 'TRANSFER'
+        ? updates.targetAccountId
+          ? String(updates.targetAccountId)
+          : existing.targetAccountId
+        : null;
+
+    const cleanTags = Array.isArray(updates.tags)
+      ? updates.tags
+          .map((t: unknown) => sanitizeText(t, 40).toLowerCase())
+          .filter(Boolean)
+          .slice(0, 15)
+      : existing.tags;
 
     const updated = await prisma.transaction.update({
-      where: { id },
+      where: { id: String(id) },
       data: {
         type: newType,
-        description: updates.description ?? existing.description,
+        description:
+          updates.description !== undefined
+            ? sanitizeText(updates.description, 200) || existing.description
+            : existing.description,
         amount: newAmount,
         date: updates.date ? new Date(updates.date) : existing.date,
         status: updates.status ?? existing.status,
-        paymentMethod: updates.paymentMethod ?? existing.paymentMethod,
-        currency: updates.currency ?? existing.currency,
-        exchangeRate: updates.exchangeRate ?? existing.exchangeRate,
-        notes: updates.notes !== undefined ? updates.notes : existing.notes,
-        tags: updates.tags ?? existing.tags,
+        paymentMethod:
+          updates.paymentMethod !== undefined
+            ? sanitizeText(updates.paymentMethod, 60)
+            : existing.paymentMethod,
+        currency: VALID_CURRENCIES.has(updates.currency) ? updates.currency : existing.currency,
+        exchangeRate:
+          updates.exchangeRate !== undefined
+            ? sanitizePositiveAmount(updates.exchangeRate) || 1
+            : existing.exchangeRate,
+        notes:
+          updates.notes !== undefined
+            ? sanitizeText(updates.notes, 500) || null
+            : existing.notes,
+        tags: cleanTags,
         isInstallment:
-          updates.isInstallment !== undefined ? Boolean(updates.isInstallment) : existing.isInstallment,
+          updates.isInstallment !== undefined
+            ? Boolean(updates.isInstallment)
+            : existing.isInstallment,
         installmentNumber:
-          updates.installmentNumber !== undefined ? updates.installmentNumber : existing.installmentNumber,
+          updates.installmentNumber !== undefined
+            ? updates.installmentNumber
+            : existing.installmentNumber,
         totalInstallments:
-          updates.totalInstallments !== undefined ? updates.totalInstallments : existing.totalInstallments,
+          updates.totalInstallments !== undefined
+            ? updates.totalInstallments
+            : existing.totalInstallments,
         isRecurring:
           updates.isRecurring !== undefined ? Boolean(updates.isRecurring) : existing.isRecurring,
         recurrenceFrequency: updates.recurrenceFrequency ?? existing.recurrenceFrequency,
@@ -208,8 +267,10 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json(updated);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao atualizar transação';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao atualizar transação') },
+      { status: 500 }
+    );
   }
 }
 
@@ -217,12 +278,11 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const id = searchParams.get('id');
+    const id = sanitizeText(searchParams.get('id'), 100);
     if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
 
     const tx = await prisma.transaction.findUnique({ where: { id } });
     if (tx) {
-      // Reverter saldo da conta
       if (tx.type === 'INCOME') {
         await prisma.account.update({
           where: { id: tx.accountId },
@@ -233,13 +293,26 @@ export async function DELETE(req: Request) {
           where: { id: tx.accountId },
           data: { currentBalance: { increment: tx.amount } },
         });
+      } else if (tx.type === 'TRANSFER') {
+        await prisma.account.update({
+          where: { id: tx.accountId },
+          data: { currentBalance: { increment: tx.amount } },
+        });
+        if (tx.targetAccountId) {
+          await prisma.account.update({
+            where: { id: tx.targetAccountId },
+            data: { currentBalance: { decrement: tx.amount } },
+          });
+        }
       }
       await prisma.transaction.delete({ where: { id } });
     }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro ao excluir transação';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: getSafeErrorMessage(error, 'Erro ao excluir transação') },
+      { status: 500 }
+    );
   }
 }

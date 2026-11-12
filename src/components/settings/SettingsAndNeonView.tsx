@@ -453,20 +453,49 @@ export function SettingsAndNeonView() {
       </div>
 
       {/* SEÇÃO 4: Segurança & Logs de Auditoria */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3">
-        <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <Shield className="w-5 h-5 text-emerald-500" />
-          <span>Segurança & Logs de Auditoria</span>
-        </h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Autenticação de dois fatores (2FA), criptografia em repouso e rastreamento de alterações financeiras
-        </p>
+      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Shield className="w-5 h-5 text-emerald-500" />
+            <span>Camadas de Segurança Ativas & Auditoria</span>
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Criptografia PBKDF2-SHA512, cookies de sessão assinados (HttpOnly), Rate Limiting e isolamento estrito de contexto
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+            <span className="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">
+              Criptografia PBKDF2-SHA512
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              100.000 iterações com salt aleatório por senha e comparação timing-safe
+            </span>
+          </div>
+          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+            <span className="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">
+              Sessão Assinada & Rate Limit
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Token HMAC em Cookie HttpOnly e proteção contra força bruta por IP
+            </span>
+          </div>
+          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+            <span className="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">
+              Headers & Sanitização XSS
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              HSTS, X-Frame-Options DENY, nosniff e higienização de inputs nas APIs
+            </span>
+          </div>
+        </div>
 
         <div className="space-y-2 pt-2">
           {[
-            { action: 'TRANSACTION_CREATE', text: 'Lançamento de Pró-Labore Rogério sincronizado com espelho PF', time: 'Hoje às 14:32' },
-            { action: 'RECONCILIATION_MATCH', text: 'Extrato OFX Itaú importado com 5 correspondências validadas', time: 'Hoje às 11:15' },
-            { action: 'BUDGET_ALERT', text: 'Alerta disparado: Categoria Alimentação atingiu 91% do teto', time: 'Ontem às 19:40' },
+            { action: 'AUTH_SECURITY', text: 'Proteção PBKDF2-SHA512, Cookie HttpOnly e Rate Limiting ativos', time: 'Ativo' },
+            { action: 'TRANSACTION_SYNC', text: 'Validação e sanitização de payloads financeiras com Neon HTTPS', time: 'Ativo' },
+            { action: 'CONTEXT_ISOLATION', text: 'Isolamento estrito entre espaços Pessoal (PF) e Corporativo (PJ)', time: 'Ativo' },
           ].map((log, idx) => (
             <div key={idx} className="flex items-center justify-between text-xs py-2 border-b border-slate-100 dark:border-slate-800 last:border-0 font-mono">
               <div className="flex items-center gap-2">
@@ -475,7 +504,7 @@ export function SettingsAndNeonView() {
                 </span>
                 <span className="text-slate-700 dark:text-slate-300 font-sans">{log.text}</span>
               </div>
-              <span className="text-slate-400 text-[10px] whitespace-nowrap">{log.time}</span>
+              <span className="text-emerald-500 text-[10px] font-semibold whitespace-nowrap">{log.time}</span>
             </div>
           ))}
         </div>
