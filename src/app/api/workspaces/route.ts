@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     }
 
     const wsType = body.type === 'PERSONAL' ? 'PERSONAL' : 'CORPORATE';
-    const workspace = await prisma.workspace.create({
+    const baseWs = await prisma.workspace.create({
       data: {
         name: cleanName,
         type: wsType,
@@ -62,58 +62,72 @@ export async function POST(req: Request) {
         legalName: sanitizeText(body.legalName, 140) || undefined,
         defaultCurrency: body.defaultCurrency || 'BRL',
         colorTheme: sanitizeText(body.colorTheme, 20) || '#6366f1',
-        members: {
-          create: {
-            userId,
-            role: 'OWNER',
-          },
-        },
-        accounts: {
-          create: {
-            name:
-              wsType === 'CORPORATE'
-                ? 'Conta Empresarial Principal'
-                : 'Conta Corrente Principal',
-            type: 'CHECKING',
-            bankName: 'Meu Banco',
-            currency: body.defaultCurrency || 'BRL',
-            initialBalance: 0,
-            currentBalance: 0,
-            color: sanitizeText(body.colorTheme, 20) || '#6366f1',
-          },
-        },
-        categories: {
-          create:
-            wsType === 'CORPORATE'
-              ? [
-                  { name: 'Faturamento de Serviços / Vendas', type: 'INCOME', icon: 'Briefcase', color: '#10b981' },
-                  { name: 'Contratos Recorrentes (MRR)', type: 'INCOME', icon: 'TrendingUp', color: '#06b6d4' },
-                  { name: 'Folha & Pró-Labore', type: 'EXPENSE', icon: 'Users', color: '#6366f1' },
-                  { name: 'Impostos & Taxas (DAS / ISS / IRPJ)', type: 'EXPENSE', icon: 'FileText', color: '#ef4444' },
-                  { name: 'Infraestrutura & Cloud / SaaS', type: 'EXPENSE', icon: 'Server', color: '#0ea5e9' },
-                  { name: 'Marketing & Aquisição (Ads)', type: 'EXPENSE', icon: 'Megaphone', color: '#f97316' },
-                  { name: 'Fornecedores & Operação', type: 'EXPENSE', icon: 'Truck', color: '#8b5cf6' },
-                  { name: 'Despesas Bancárias & Tarifas', type: 'EXPENSE', icon: 'CreditCard', color: '#64748b' },
-                ]
-              : [
-                  { name: 'Salário / Renda Principal', type: 'INCOME', icon: 'Briefcase', color: '#10b981' },
-                  { name: 'Rendimentos / Investimentos', type: 'INCOME', icon: 'TrendingUp', color: '#06b6d4' },
-                  { name: 'Serviços & Consultorias', type: 'INCOME', icon: 'Laptop', color: '#3b82f6' },
-                  { name: 'Moradia & Contas', type: 'EXPENSE', icon: 'Home', color: '#ef4444' },
-                  { name: 'Alimentação & Mercado', type: 'EXPENSE', icon: 'ShoppingBag', color: '#f97316' },
-                  { name: 'Transporte & Combustível', type: 'EXPENSE', icon: 'Car', color: '#f59e0b' },
-                  { name: 'Saúde & Farmácia', type: 'EXPENSE', icon: 'Heart', color: '#ec4899' },
-                  { name: 'Educação & Cursos', type: 'EXPENSE', icon: 'BookOpen', color: '#6366f1' },
-                  { name: 'Lazer & Restaurantes', type: 'EXPENSE', icon: 'Compass', color: '#8b5cf6' },
-                ],
-        },
-      },
-      include: {
-        accounts: true,
-        categories: true,
-        costCenters: true,
       },
     });
+
+    const defaultCategories =
+      wsType === 'CORPORATE'
+        ? [
+            { name: 'Faturamento de Serviços / Vendas', type: 'INCOME' as const, icon: 'Briefcase', color: '#10b981', workspaceId: baseWs.id },
+            { name: 'Contratos Recorrentes (MRR)', type: 'INCOME' as const, icon: 'TrendingUp', color: '#06b6d4', workspaceId: baseWs.id },
+            { name: 'Folha & Pró-Labore', type: 'EXPENSE' as const, icon: 'Users', color: '#6366f1', workspaceId: baseWs.id },
+            { name: 'Impostos & Taxas (DAS / ISS / IRPJ)', type: 'EXPENSE' as const, icon: 'FileText', color: '#ef4444', workspaceId: baseWs.id },
+            { name: 'Infraestrutura & Cloud / SaaS', type: 'EXPENSE' as const, icon: 'Server', color: '#0ea5e9', workspaceId: baseWs.id },
+            { name: 'Marketing & Aquisição (Ads)', type: 'EXPENSE' as const, icon: 'Megaphone', color: '#f97316', workspaceId: baseWs.id },
+            { name: 'Fornecedores & Operação', type: 'EXPENSE' as const, icon: 'Truck', color: '#8b5cf6', workspaceId: baseWs.id },
+            { name: 'Despesas Bancárias & Tarifas', type: 'EXPENSE' as const, icon: 'CreditCard', color: '#64748b', workspaceId: baseWs.id },
+          ]
+        : [
+            { name: 'Salário / Renda Principal', type: 'INCOME' as const, icon: 'Briefcase', color: '#10b981', workspaceId: baseWs.id },
+            { name: 'Rendimentos / Investimentos', type: 'INCOME' as const, icon: 'TrendingUp', color: '#06b6d4', workspaceId: baseWs.id },
+            { name: 'Serviços & Consultorias', type: 'INCOME' as const, icon: 'Laptop', color: '#3b82f6', workspaceId: baseWs.id },
+            { name: 'Moradia & Contas', type: 'EXPENSE' as const, icon: 'Home', color: '#ef4444', workspaceId: baseWs.id },
+            { name: 'Alimentação & Mercado', type: 'EXPENSE' as const, icon: 'ShoppingBag', color: '#f97316', workspaceId: baseWs.id },
+            { name: 'Transporte & Combustível', type: 'EXPENSE' as const, icon: 'Car', color: '#f59e0b', workspaceId: baseWs.id },
+            { name: 'Saúde & Farmácia', type: 'EXPENSE' as const, icon: 'Heart', color: '#ec4899', workspaceId: baseWs.id },
+            { name: 'Educação & Cursos', type: 'EXPENSE' as const, icon: 'BookOpen', color: '#6366f1', workspaceId: baseWs.id },
+            { name: 'Lazer & Restaurantes', type: 'EXPENSE' as const, icon: 'Compass', color: '#8b5cf6', workspaceId: baseWs.id },
+          ];
+
+    const [, createdAccount] = await Promise.all([
+      prisma.workspaceMember.create({
+        data: {
+          userId,
+          workspaceId: baseWs.id,
+          role: 'OWNER',
+        },
+      }),
+      prisma.account.create({
+        data: {
+          name:
+            wsType === 'CORPORATE'
+              ? 'Conta Empresarial Principal'
+              : 'Conta Corrente Principal',
+          type: 'CHECKING',
+          bankName: 'Meu Banco',
+          currency: body.defaultCurrency || 'BRL',
+          initialBalance: 0,
+          currentBalance: 0,
+          color: sanitizeText(body.colorTheme, 20) || '#6366f1',
+          workspaceId: baseWs.id,
+        },
+      }),
+      prisma.category.createMany({
+        data: defaultCategories,
+      }),
+    ]);
+
+    const createdCategories = await prisma.category.findMany({
+      where: { workspaceId: baseWs.id },
+      orderBy: { name: 'asc' },
+    });
+
+    const workspace = {
+      ...baseWs,
+      accounts: [createdAccount],
+      categories: createdCategories,
+      costCenters: [],
+    };
     return NextResponse.json(workspace);
   } catch (error: unknown) {
     return NextResponse.json(

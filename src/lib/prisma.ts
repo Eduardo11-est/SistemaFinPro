@@ -30,6 +30,23 @@ function createPrismaClient(): PrismaClient {
   // Elimina completamente problemas de TCP 5432, timeouts e PgBouncer no Render.
   const adapter = new PrismaNeonHTTP(connectionString, {});
 
+  // Habilita suporte a nested writes (create com relações, createMany, upsert, include)
+  // no driver HTTP stateless da Neon, evitando o erro "Transactions are not supported in HTTP mode".
+  const origConnect = adapter.connect.bind(adapter);
+  adapter.connect = async () => {
+    const conn = await origConnect();
+    conn.startTransaction = async () => ({
+      provider: conn.provider,
+      adapterName: conn.adapterName,
+      options: { usePhantomQuery: true },
+      queryRaw: (q) => conn.queryRaw(q),
+      executeRaw: (q) => conn.executeRaw(q),
+      commit: async () => {},
+      rollback: async () => {},
+    });
+    return conn;
+  };
+
   return new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
