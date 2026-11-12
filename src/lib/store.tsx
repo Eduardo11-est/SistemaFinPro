@@ -81,6 +81,8 @@ interface FinanceContextType {
   allTransactions: Transaction[];
   isTransactionsLoading: boolean;
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
+  addTransactionsBatch: (txList: Omit<Transaction, 'id'>[]) => void;
+  payCreditCardInvoice: (cardId: string, monthPrefix: string, sourceAccountId: string) => void;
   updateTransaction: (id: string, updates: Partial<Transaction>) => void;
   deleteTransaction: (id: string) => void;
   editingTransaction: Transaction | null;
@@ -1264,6 +1266,161 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     [accounts, categories, currentWorkspace.name]
   );
 
+  // Batch creation for multi-installment credit card projections
+  const addTransactionsBatch = useCallback((txList: Omit<Transaction, 'id'>[]) => {
+    if (!txList.length) return;
+    const uid = currentUserIdRef.current;
+    const baseTime = Date.now();
+    const createdLocal: Transaction[] = txList.map((tx, idx) => ({
+      ...tx,
+      id: `tx-${baseTime}-${idx}`,
+    }));
+
+    // Calcula impacto consolidado por conta
+    const deltaByAccount = new Map<string, number>();
+    for (let i = 0; i < createdLocal.length; i++) {
+      const t = createdLocal[i];
+      const prevDelta = deltaByAccount.get(t.accountId) || 0;
+      if (t.type === 'INCOME') {
+        deltaByAccount.set(t.accountId, prevDelta + t.amount);
+      } else if (t.type === 'EXPENSE' || t.type === 'TRANSFER') {
+        deltaByAccount.set(t.accountId, prevDelta - t.amount);
+      }
+      if (t.type === 'TRANSFER' && t.targetAccountId) {
+        const prevTarget = deltaByAccount.get(t.targetAccountId) || 0;
+        deltaByAccount.set(t.targetAccountId, prevTarget + t.amount);
+      }
+    }
+
+    setAccounts((prev) => {
+      const updated = prev.map((acc) => {
+        const delta = deltaByAccount.get(acc.id);
+        if (!delta) return acc;
+        return {
+          ...acc,
+          currentBalance: Math.round((acc.currentBalance + delta) * 100) / 100,
+        };
+      });
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    setTransactions((prev) => {
+      const updated = [...createdLocal, ...prev];
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    // Persiste cada parcela no banco Neon
+    createdLocal.forEach((localTx) => {
+      fetch('/api/transactions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-id': uid } : {}),
+        },
+        body: JSON.stringify({ ...localTx, userId: uid }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((created) => {
+          if (created?.id) {
+            setTransactions((prev) => {
+              const updated = prev.map((t) =>
+                t.id === localTx.id ? { ...localTx, id: created.id } : t
+              );
+              if (uid) {
+                try {
+                  localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+                } catch {}
+              }
+              return updated;
+            });
+          }
+        })
+        .catch(() => {});
+    });
+  }, []);
+
+  // Liquidação de Fatura de Cartão de Crédito do mês selecionado
+  const payCreditCardInvoice = useCallback(
+    (cardId: string, monthPrefix: string, sourceAccountId: string) => {
+      const uid = currentUserIdRef.current;
+      const card = accounts.find((a) => a.id === cardId);
+      if (!card) return;
+
+      const invoiceItems = transactions.filter(
+        (t) =>
+          t.accountId === cardId &&
+          t.type === 'EXPENSE' &&
+          t.status !== 'CANCELLED' &&
+          t.date.startsWith(monthPrefix) &&
+          !t.tags?.includes('fatura-paga')
+      );
+
+      if (invoiceItems.length === 0) return;
+
+      const totalOpen =
+        Math.round(invoiceItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+      const itemIds = new Set(invoiceItems.map((i) => i.id));
+
+      // 1. Marca todos os itens da fatura daquele mês como pagos ('fatura-paga')
+      setTransactions((prev) => {
+        const updated = prev.map((tx) => {
+          if (!itemIds.has(tx.id)) return tx;
+          const nextTags = Array.from(new Set([...(tx.tags || []), 'fatura-paga']));
+          return { ...tx, tags: nextTags };
+        });
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+          } catch {}
+        }
+        return updated;
+      });
+
+      invoiceItems.forEach((tx) => {
+        const nextTags = Array.from(new Set([...(tx.tags || []), 'fatura-paga']));
+        if (!tx.id.startsWith('tx-')) {
+          fetch('/api/transactions', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(uid ? { 'x-user-id': uid } : {}),
+            },
+            body: JSON.stringify({ id: tx.id, tags: nextTags, userId: uid }),
+          }).catch(() => {});
+        }
+      });
+
+      // 2. Registra a transferência de pagamento da conta bancária para o cartão de crédito
+      if (sourceAccountId && totalOpen > 0) {
+        addTransaction({
+          type: 'TRANSFER',
+          description: `Pagamento Fatura ${card.name} (${monthPrefix})`,
+          amount: totalOpen,
+          date: new Date().toISOString().split('T')[0],
+          status: 'COMPLETED',
+          paymentMethod: 'Pagamento de Fatura',
+          currency: card.currency,
+          exchangeRate: 1,
+          tags: ['pagamento-fatura'],
+          workspaceId: card.workspaceId,
+          accountId: sourceAccountId,
+          targetAccountId: card.id,
+        });
+      }
+    },
+    [accounts, transactions, addTransaction]
+  );
+
   const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
     const uid = currentUserIdRef.current;
     setTransactions((prev) => {
@@ -1774,6 +1931,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       allTransactions: transactions,
       isTransactionsLoading,
       addTransaction,
+      addTransactionsBatch,
+      payCreditCardInvoice,
       updateTransaction,
       deleteTransaction,
       editingTransaction,
@@ -1836,6 +1995,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       transactions,
       isTransactionsLoading,
       addTransaction,
+      addTransactionsBatch,
+      payCreditCardInvoice,
       updateTransaction,
       deleteTransaction,
       editingTransaction,

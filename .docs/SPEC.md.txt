@@ -1,43 +1,28 @@
-Plano de Melhorias - Etapa 1: Tela de Transações
+Prompt de Engenharia para Melhoria do Sistema Financeiro: Módulo de Cartão de Crédito
 
-Este documento especifica as melhorias necessárias para a Tela de Transações do sistema de controle financeiro.
+Contexto e Papel
 
-1. Correção do Campo de Seleção de Categorias (Select / Dropdown)
+Você é um Arquiteto de Software Sênior, Desenvolvedor Full Stack especializado em Next.js (App Router), React, TypeScript, Prisma ORM e Neon PostgreSQL (adaptado da proposta original C#/Angular/PostgreSQL para a stack oficial do projeto FinPro), e especialista em Engenharia de Prompt. O usuário possui um sistema de controle financeiro próprio estruturado na regra de orçamento 50/30/20 (Necessidades, Desejos, Metas/Investimentos). O objetivo é projetar e implementar um Módulo de Cartão de Crédito robusto e integrado que permita o controle total dos gastos atuais e futuros (projeção de faturas, parcelamentos, fechamento e vencimento), inspirado na estrutura da planilha de controle financeiro de referência.
 
-Problema: Ao clicar para adicionar ou editar um novo registro de transação, a lista de opções do campo "Categoria" (list Categoria) exibe-se vazia, não carregando nenhuma informação cadastrada.
+Objetivo da Tarefa
 
-Ação Esperada:
+Desenvolver a especificação técnica detalhada, arquitetura de dados, contratos de API (Next.js Route Handlers + Prisma) e componentes de interface (React/Tailwind) para o novo Módulo de Cartão de Crédito, permitindo gerenciar o ciclo de vida das faturas mês a mês e integrar os gastos com a regra orçamentária do sistema principal.
 
-Verificar a chamada à API ou estado local responsável por buscar as categorias cadastradas no sistema.
+Requisitos Funcionais e de Negócio (Status: IMPLEMENTADO)
 
-Garantir que o componente de seleção (Select ou Dropdown) seja populado corretamente com as categorias ativas ao abrir o modal ou formulário de novo registro.
+1. Gestão de Cartões (`src/components/accounts/AccountsView.tsx` & `src/lib/credit-card.ts`):
+   - Cadastro, edição e listagem de cartões de crédito (Nome, Emissor, Limite Total, Dia de Fechamento e Dia de Vencimento).
+   - Cálculo dinâmico do limite disponível (`calculateCardLimitSummary`) com base nas faturas em aberto do mês atual e todas as parcelas futuras projetadas.
 
-Tratar o estado de carregamento (loading) e exibir uma mensagem amigável caso nenhuma categoria esteja cadastrada (com um atalho para criá-las, se aplicável).
+2. Lançamentos de Transações À Vista e Parceladas (`src/components/transactions/TransactionModal.tsx`):
+   - Registro de transações informando: Cartão/Conta, Descrição, Valor Total, Número de Parcelas (ex: 1/12 até 48x), Data da Compra, Categoria e Pilar do Orçamento 50/30/20 (`50% Necessidades`, `30% Desejos`, `20% Metas/Investimentos`).
+   - Motor de Projeção de Parcelas (`projectInstallments` em `src/lib/credit-card.ts`): Lógica automática que calcula em qual mês de vencimento cada parcela irá cair, respeitando o dia de fechamento (`closingDay`) e o dia de vencimento (`dueDay`) da fatura do cartão, com criação em lote (`addTransactionsBatch`) vinculada por `installmentGroupId`.
 
-2. Otimização de Desempenho e Fluidez da Tela
+3. Visão de Faturas Mês a Mês (`src/components/accounts/AccountsView.tsx`):
+   - Aba dedicada "Faturas Mês a Mês" com linha do tempo navegável por mês/ano (ex: 10/2026, 11/2026, 12/2026, 01/2027...).
+   - Detalhamento auditável de todos os itens e parcelas que compõem a fatura de determinado mês e sua distribuição nos pilares 50/30/20.
+   - Status automático da fatura (`Prevista / Em Aberto`, `Fatura Fechada`, `Paga / Realizada`, `Em Atraso`).
+   - Liquidação / Pagamento de fatura com 1 clique debitando da conta corrente escolhida e liberando o limite disponível do cartão.
 
-Problema: A navegação e a interação na tela de transações estão lentas ou travando, carecendo de fluidez na experiência do usuário.
-
-Ação Esperada:
-
-Avaliar e otimizar renderizações desnecessárias em componentes React/front-end (ex: uso de useMemo, useCallback, ou refatoração de estado global/local).
-
-Implementar paginação ou rolagem infinita (infinite scroll) / virtualização de lista caso a tabela/listagem de transações contenha um grande volume de dados.
-
-Otimizar as requisições de rede para evitar múltiplos fetches redundantes ao carregar ou filtrar transações.
-
-3. Indicador de Gastos do Mês com Base no Salário
-
-Problema: O usuário precisa visualizar de forma clara o panorama dos gastos mensais em relação à sua renda (salário).
-
-Ação Esperada:
-
-Configuração de Salário: Adicionar um campo ou configuração onde o usuário possa definir o valor do seu salário/renda mensal (com opção de edição em configurações ou diretamente no painel da tela).
-
-Indicador Visual na Tela de Transações:
-
-Calcular o somatório das despesas do mês corrente.
-
-Expor um card ou barra de progresso mostrando o total gasto no mês versus o salário definido.
-
-Exibir o saldo restante ou porcentagem utilizada para melhor controle financeiro visual.
+4. Integração com o Dashboard Geral e Orçamento 50/30/20 (`src/components/dashboard/KpiCards.tsx` & `src/components/budgets/BudgetsAndGoalsView.tsx`):
+   - O valor da fatura do mês atual e das parcelas que vencem no período é refletido automaticamente no Dashboard Geral, no Extrato Mensal e no Painel da Regra 50/30/20.

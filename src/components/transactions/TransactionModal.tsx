@@ -16,8 +16,16 @@ import {
   AlertCircle,
   Check,
   Pencil,
+  CreditCard,
+  Calendar,
 } from 'lucide-react';
 import { TransactionType, CurrencyType, RecurrenceFrequency } from '@/types/finance';
+import {
+  BUDGET_PILLARS,
+  BudgetPillar,
+  projectInstallments,
+  resolveTransactionPillar,
+} from '@/lib/credit-card';
 
 export function TransactionModal() {
   const {
@@ -33,6 +41,7 @@ export function TransactionModal() {
     currentWorkspace,
     workspaces,
     addTransaction,
+    addTransactionsBatch,
     updateTransaction,
     formatMoney,
   } = useFinance();
@@ -53,9 +62,31 @@ export function TransactionModal() {
   const [tagsStr, setTagsStr] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Parcelamento
+  // Parcelamento & Regra 50/30/20
   const [isInstallment, setIsInstallment] = useState(false);
   const [totalInstallments, setTotalInstallments] = useState(2);
+  const [budgetPillar, setBudgetPillar] = useState<BudgetPillar>('NEEDS');
+
+  const selectedAccount = useMemo(
+    () => accounts.find((a) => a.id === accountId),
+    [accounts, accountId]
+  );
+  const isCreditCardSelected = selectedAccount?.type === 'CREDIT_CARD';
+
+  // Motor de Projeção de Parcelas em tempo real
+  const installmentPreview = useMemo(() => {
+    const parsedAmt = parseFloat(amountStr.replace(/\./g, '').replace(',', '.')) || 0;
+    const count = isInstallment ? Math.max(2, totalInstallments) : 1;
+    if (parsedAmt <= 0 || (!isInstallment && !isCreditCardSelected)) return [];
+    return projectInstallments({
+      totalAmount: parsedAmt,
+      purchaseDateStr: date,
+      totalInstallments: count,
+      closingDay: selectedAccount?.closingDay || 28,
+      dueDay: selectedAccount?.dueDay || 5,
+      isCreditCard: isCreditCardSelected,
+    });
+  }, [amountStr, date, isInstallment, totalInstallments, isCreditCardSelected, selectedAccount]);
 
   // Recorrência
   const [isRecurring, setIsRecurring] = useState(false);
@@ -112,6 +143,7 @@ export function TransactionModal() {
       setNotes(editingTransaction.notes || '');
       setIsInstallment(Boolean(editingTransaction.isInstallment));
       setTotalInstallments(editingTransaction.totalInstallments || 2);
+      setBudgetPillar(resolveTransactionPillar(editingTransaction, categories));
       setIsRecurring(Boolean(editingTransaction.isRecurring));
       setRecurrenceFrequency(editingTransaction.recurrenceFrequency || 'MONTHLY');
       setIsInterContext(Boolean(editingTransaction.tags?.includes('pro-labore')));
@@ -125,7 +157,14 @@ export function TransactionModal() {
       setAccountId(accounts[0]?.id || '');
       setTargetAccountId('');
       const expCats = categories.filter((c) => c.type === 'EXPENSE');
-      setCategoryId(expCats[0]?.id || '');
+      const defaultCatId = expCats[0]?.id || '';
+      setCategoryId(defaultCatId);
+      setBudgetPillar(
+        resolveTransactionPillar(
+          { tags: [], categoryId: defaultCatId, description: '' },
+          categories
+        )
+      );
       setCostCenterId('');
       setCurrency('BRL');
       setExchangeRate(1);
@@ -201,14 +240,21 @@ export function TransactionModal() {
       return;
     }
 
+    const pillarTags = new Set(['50-necessidades', '30-desejos', '20-metas']);
     const tags = tagsStr
       .split(',')
       .map((t) => t.trim().toLowerCase().replace('#', ''))
-      .filter(Boolean);
+      .filter((t) => Boolean(t) && !pillarTags.has(t));
+
+    if (type === 'EXPENSE') {
+      tags.push(BUDGET_PILLARS[budgetPillar].tag);
+    }
 
     if (isInterContext && !tags.includes('pro-labore')) {
       tags.push('pro-labore');
     }
+
+    const baseCleanDesc = description.trim().replace(/\s*\(\d+\/\d+\)$/, '');
 
     if (isEditing && editingTransaction) {
       updateTransaction(editingTransaction.id, {
@@ -230,38 +276,71 @@ export function TransactionModal() {
         costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
       });
     } else if (isInstallment && totalInstallments > 1) {
-      addTransaction({
+      const groupId = `grp-${Date.now()}`;
+      const projected = projectInstallments({
+        totalAmount: amount,
+        purchaseDateStr: date,
+        totalInstallments,
+        closingDay: selectedAccount?.closingDay || 28,
+        dueDay: selectedAccount?.dueDay || 5,
+        isCreditCard: isCreditCardSelected,
+      });
+
+      const batchPayload = projected.map((item) => ({
         type,
-        description: `${description.trim()} (1/${totalInstallments})`,
-        amount: Math.round((amount / totalInstallments) * 100) / 100,
-        date,
-        status: 'COMPLETED',
-        paymentMethod: type === 'EXPENSE' ? 'Cartão / Débito' : 'PIX',
+        description: `${baseCleanDesc} (${item.installmentNumber}/${item.totalInstallments})`,
+        amount: item.amount,
+        date: item.dueDate,
+        status: 'COMPLETED' as const,
+        paymentMethod: isCreditCardSelected
+          ? 'Cartão de Crédito'
+          : type === 'EXPENSE'
+          ? 'Parcelado'
+          : 'PIX',
         currency,
         exchangeRate,
-        notes: notes.trim() || undefined,
+        notes: notes.trim()
+          ? `${notes.trim()} | Compra em ${date}`
+          : `Compra realizada em ${date}`,
         isInstallment: true,
-        installmentNumber: 1,
-        totalInstallments,
+        installmentNumber: item.installmentNumber,
+        totalInstallments: item.totalInstallments,
+        installmentGroupId: groupId,
         tags,
         workspaceId: currentWorkspace.id,
         accountId,
         targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
         categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
         costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
-        linkedWorkspaceId: isInterContext ? linkedPersonalWorkspaceId : undefined,
-      });
+        linkedWorkspaceId:
+          isInterContext && item.installmentNumber === 1 ? linkedPersonalWorkspaceId : undefined,
+      }));
+
+      addTransactionsBatch(batchPayload);
     } else {
+      // Compra à vista (1x): se for cartão de crédito, calcula o vencimento da fatura respeitando o fechamento
+      const singleProjectedDate =
+        isCreditCardSelected && type === 'EXPENSE' && installmentPreview[0]
+          ? installmentPreview[0].dueDate
+          : date;
+
       addTransaction({
         type,
         description: description.trim(),
         amount,
-        date,
+        date: singleProjectedDate,
         status: 'COMPLETED',
-        paymentMethod: type === 'EXPENSE' ? 'Transferência / PIX' : 'PIX',
+        paymentMethod: isCreditCardSelected
+          ? 'Cartão de Crédito (1x)'
+          : type === 'EXPENSE'
+          ? 'Transferência / PIX'
+          : 'PIX',
         currency,
         exchangeRate,
-        notes: notes.trim() || undefined,
+        notes:
+          isCreditCardSelected && singleProjectedDate !== date
+            ? `${notes.trim() ? notes.trim() + ' | ' : ''}Compra em ${date}`
+            : notes.trim() || undefined,
         isRecurring,
         recurrenceFrequency: isRecurring ? recurrenceFrequency : 'NONE',
         tags,
@@ -497,7 +576,16 @@ export function TransactionModal() {
                 ) : (
                   <select
                     value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
+                    onChange={(e) => {
+                      const nextCatId = e.target.value;
+                      setCategoryId(nextCatId);
+                      setBudgetPillar(
+                        resolveTransactionPillar(
+                          { tags: [], categoryId: nextCatId, description },
+                          categories
+                        )
+                      );
+                    }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     {filteredCategories.map((cat) => (
@@ -564,6 +652,42 @@ export function TransactionModal() {
             </div>
           )}
 
+          {/* Regra 50/30/20: Seletor de Pilar do Orçamento (para Despesas) */}
+          {type === 'EXPENSE' && (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                Pilar do Orçamento 50/30/20
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['NEEDS', 'WANTS', 'GOALS'] as BudgetPillar[]).map((pillarKey) => {
+                  const meta = BUDGET_PILLARS[pillarKey];
+                  const active = budgetPillar === pillarKey;
+                  return (
+                    <button
+                      key={pillarKey}
+                      type="button"
+                      onClick={() => setBudgetPillar(pillarKey)}
+                      className={`px-2.5 py-2 rounded-xl border text-[11px] font-semibold transition-all text-left flex flex-col justify-between ${
+                        active
+                          ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 shadow-sm'
+                          : 'border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="truncate font-bold">{meta.shortLabel}</span>
+                      <span className="text-[9px] opacity-75 truncate mt-0.5">
+                        {pillarKey === 'NEEDS'
+                          ? 'Essencial / Fixo'
+                          : pillarKey === 'WANTS'
+                          ? 'Estilo de Vida'
+                          : 'Reserva / Futuro'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* REQUISITO: REGRA DE OURO - Transferência Inter-Contexto (Pró-Labore PJ -> PF) */}
           {!isPersonal && type === 'EXPENSE' && !isEditing && (
             <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 space-y-2">
@@ -590,52 +714,92 @@ export function TransactionModal() {
 
           {/* Parcelamento e Recorrência */}
           {!isEditing && (
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-4 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 font-medium">
-                <input
-                  type="checkbox"
-                  checked={isInstallment}
-                  onChange={(e) => setIsInstallment(e.target.checked)}
-                  className="rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>Parcelado?</span>
-              </label>
-
-              {isInstallment && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">Total de parcelas:</span>
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3 text-xs">
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 font-medium">
                   <input
-                    type="number"
-                    min="2"
-                    max="48"
-                    value={totalInstallments}
-                    onChange={(e) => setTotalInstallments(parseInt(e.target.value) || 2)}
-                    className="w-16 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    type="checkbox"
+                    checked={isInstallment}
+                    onChange={(e) => setIsInstallment(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500"
                   />
-                </div>
-              )}
+                  <span>Compra Parcelada (ex: 1/12)?</span>
+                </label>
 
-              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 font-medium">
-                <input
-                  type="checkbox"
-                  checked={isRecurring}
-                  onChange={(e) => setIsRecurring(e.target.checked)}
-                  className="rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>Recorrente?</span>
-              </label>
+                {isInstallment && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">Nº de parcelas:</span>
+                    <input
+                      type="number"
+                      min="2"
+                      max="48"
+                      value={totalInstallments}
+                      onChange={(e) => setTotalInstallments(parseInt(e.target.value) || 2)}
+                      className="w-16 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+                )}
 
-              {isRecurring && (
-                <select
-                  value={recurrenceFrequency}
-                  onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
-                  className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                >
-                  <option value="MONTHLY">Mensal</option>
-                  <option value="WEEKLY">Semanal</option>
-                  <option value="YEARLY">Anual</option>
-                </select>
-              )}
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={isRecurring}
+                    onChange={(e) => setIsRecurring(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Recorrente?</span>
+                </label>
+
+                {isRecurring && (
+                  <select
+                    value={recurrenceFrequency}
+                    onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
+                    className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                  >
+                    <option value="MONTHLY">Mensal</option>
+                    <option value="WEEKLY">Semanal</option>
+                    <option value="YEARLY">Anual</option>
+                  </select>
+                )}
+              </div>
+
+              {/* Preview do Motor de Projeção de Faturas & Parcelas */}
+              {type === 'EXPENSE' &&
+                installmentPreview.length > 0 &&
+                (isInstallment || isCreditCardSelected) && (
+                  <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 space-y-1.5">
+                    <div className="flex items-center justify-between text-purple-700 dark:text-purple-300 font-semibold text-[11px]">
+                      <span className="flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-purple-500" />
+                        <span>
+                          {isCreditCardSelected
+                            ? `Motor de Fatura (${selectedAccount?.name} • Fecha dia ${selectedAccount?.closingDay || 28}, Vence dia ${selectedAccount?.dueDay || 5})`
+                            : 'Projeção Automática de Parcelas'}
+                        </span>
+                      </span>
+                      <span className="font-mono">
+                        {installmentPreview.length}x de{' '}
+                        {formatMoney(installmentPreview[0].amount, currency)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-purple-600/90 dark:text-purple-300/80 font-mono">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        1ª parcela cai na fatura{' '}
+                        <strong>{installmentPreview[0].invoiceMonth}</strong> (venc.{' '}
+                        {installmentPreview[0].dueDate.split('-').reverse().join('/')})
+                      </span>
+                      {installmentPreview.length > 1 && (
+                        <span>
+                          Última ({installmentPreview.length}/{installmentPreview.length}) em{' '}
+                          <strong>
+                            {installmentPreview[installmentPreview.length - 1].invoiceMonth}
+                          </strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
             </div>
           )}
 

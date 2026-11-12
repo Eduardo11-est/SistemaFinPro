@@ -123,6 +123,7 @@ export async function POST(req: Request) {
         isInstallment: Boolean(body.isInstallment),
         installmentNumber: body.installmentNumber ? Number(body.installmentNumber) : undefined,
         totalInstallments: body.totalInstallments ? Number(body.totalInstallments) : undefined,
+        installmentGroupId: body.installmentGroupId ? sanitizeText(body.installmentGroupId, 100) : undefined,
         isRecurring: Boolean(body.isRecurring),
         recurrenceFrequency: body.recurrenceFrequency || 'NONE',
         linkedTransactionId: body.linkedTransactionId,
@@ -287,6 +288,10 @@ export async function PATCH(req: Request) {
           updates.totalInstallments !== undefined
             ? updates.totalInstallments
             : existing.totalInstallments,
+        installmentGroupId:
+          updates.installmentGroupId !== undefined
+            ? updates.installmentGroupId
+            : existing.installmentGroupId,
         isRecurring:
           updates.isRecurring !== undefined ? Boolean(updates.isRecurring) : existing.isRecurring,
         recurrenceFrequency: updates.recurrenceFrequency ?? existing.recurrenceFrequency,

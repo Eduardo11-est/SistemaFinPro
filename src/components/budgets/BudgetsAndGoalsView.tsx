@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useFinance } from '@/lib/store';
 import {
   PieChart,
@@ -9,28 +9,28 @@ import {
   CheckCircle2,
   TrendingUp,
   Plus,
-  ShieldCheck,
-  Plane,
-  Home,
-  DollarSign,
   Sparkles,
-  X
+  CreditCard,
+  X,
 } from 'lucide-react';
+import { BUDGET_PILLARS, BudgetPillar, resolveTransactionPillar } from '@/lib/credit-card';
 
 export function BudgetsAndGoalsView() {
   const {
     budgets,
     addBudget,
-    deleteBudget,
     categories,
+    accounts,
+    transactions,
     goals,
     formatMoney,
     contributeToGoal,
     addGoal,
-    deleteGoal,
     currentWorkspace,
     currentMonthPrefix,
-    stats
+    monthlySalary,
+    stats,
+    setActiveView,
   } = useFinance();
 
   const isPersonal = currentWorkspace.type === 'PERSONAL';
@@ -59,6 +59,58 @@ export function BudgetsAndGoalsView() {
   };
 
   const expenseCategories = categories.filter((c) => c.type === 'EXPENSE');
+
+  // Cálculo consolidado da Regra 50/30/20 integrando gastos à vista + Fatura de Cartão do mês atual
+  const rule503020 = useMemo(() => {
+    const baseIncome = monthlySalary > 0 ? monthlySalary : stats.monthIncome;
+    const creditCardIds = new Set(
+      accounts.filter((a) => a.type === 'CREDIT_CARD').map((a) => a.id)
+    );
+
+    const spentByPillar: Record<BudgetPillar, { total: number; cardPortion: number }> = {
+      NEEDS: { total: 0, cardPortion: 0 },
+      WANTS: { total: 0, cardPortion: 0 },
+      GOALS: { total: 0, cardPortion: 0 },
+    };
+
+    let currentMonthCardInvoiceTotal = 0;
+
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
+      if (tx.type !== 'EXPENSE' || tx.status === 'CANCELLED') continue;
+      if (!tx.date.startsWith(currentMonthPrefix)) continue;
+
+      const pillar = resolveTransactionPillar(tx, categories);
+      spentByPillar[pillar].total += tx.amount;
+
+      if (creditCardIds.has(tx.accountId)) {
+        spentByPillar[pillar].cardPortion += tx.amount;
+        currentMonthCardInvoiceTotal += tx.amount;
+      }
+    }
+
+    return {
+      baseIncome,
+      currentMonthCardInvoiceTotal,
+      pillars: (['NEEDS', 'WANTS', 'GOALS'] as BudgetPillar[]).map((key) => {
+        const meta = BUDGET_PILLARS[key];
+        const idealLimit = (baseIncome * meta.targetPercent) / 100;
+        const spent = spentByPillar[key].total;
+        const cardSpent = spentByPillar[key].cardPortion;
+        const usedPercentOfIdeal = idealLimit > 0 ? Math.round((spent / idealLimit) * 100) : 0;
+        const shareOfIncome = baseIncome > 0 ? Math.round((spent / baseIncome) * 1000) / 10 : 0;
+
+        return {
+          meta,
+          idealLimit,
+          spent,
+          cardSpent,
+          usedPercentOfIdeal,
+          shareOfIncome,
+        };
+      }),
+    };
+  }, [monthlySalary, stats.monthIncome, accounts, transactions, currentMonthPrefix, categories]);
 
   const handleCreateBudget = (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,6 +162,104 @@ export function BudgetsAndGoalsView() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
+      {/* SEÇÃO 0: REGRA ORÇAMENTÁRIA 50/30/20 INTEGRADA COM FATURA DE CARTÃO DE CRÉDITO */}
+      <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-emerald-500" />
+              <span>Regra de Orçamento 50/30/20 & Integração com Fatura de Cartão</span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Distribuição automática dos gastos do mês ({currentMonthPrefix}) em 50% Necessidades, 30% Desejos e 20% Metas/Investimentos, consolidando faturas de cartão e conta corrente
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs flex items-center gap-2">
+              <CreditCard className="w-3.5 h-3.5 text-purple-500" />
+              <span className="text-slate-600 dark:text-slate-300">
+                Fatura Cartão no Mês:{' '}
+                <strong className="text-purple-600 dark:text-purple-400">
+                  {formatMoney(rule503020.currentMonthCardInvoiceTotal)}
+                </strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveView('accounts')}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors"
+            >
+              Auditar Faturas →
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {rule503020.pillars.map((item) => {
+            const isOver = item.usedPercentOfIdeal > 100;
+            return (
+              <div
+                key={item.meta.id}
+                className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 flex flex-col justify-between space-y-3"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">
+                      {item.meta.label}
+                    </span>
+                    <span
+                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                        isOver
+                          ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {item.shareOfIncome}% da renda
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">{item.meta.description}</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-baseline justify-between text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Realizado no Mês</span>
+                      <span className="text-base font-bold text-slate-900 dark:text-white">
+                        {formatMoney(item.spent)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block">
+                        Meta Ideal ({item.meta.targetPercent}%)
+                      </span>
+                      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        {formatMoney(item.idealLimit)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, item.usedPercentOfIdeal)}%`,
+                        backgroundColor: isOver ? '#ef4444' : item.meta.color,
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                    <span>{item.usedPercentOfIdeal}% do teto do pilar</span>
+                    <span>No Cartão: {formatMoney(item.cardSpent)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* SEÇÃO 1: Orçamentos por Categoria (Budgeting com alertas de 80% e 100%) */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
