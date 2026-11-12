@@ -1,0 +1,14 @@
+Data,Tipo,Descricao,Valor,Moeda,Conta,Categoria,Parcelas,Tags
+2026-11-05,INCOME,Salario Mensal Liquido,10000.00,BRL,Conta Corrente Principal,Salário / Renda Principal,1,salario;renda-fixa
+2026-11-10,INCOME,Consultoria Projeto Web,2500.00,BRL,Conta Corrente Principal,Serviços & Consultorias,1,freelance;extra
+2026-11-06,EXPENSE,Aluguel + Condominio + IPTU,2800.00,BRL,Conta Corrente Principal,Moradia & Contas,1,50-necessidades;fixo
+2026-11-08,EXPENSE,Supermercado Atacadao Compra Mensal,1250.00,BRL,Cartão de Crédito,Alimentação & Mercado,1,50-necessidades;mercado
+2026-11-10,EXPENSE,Energia Eletrica + Fibra Optica,380.00,BRL,Conta Corrente Principal,Moradia & Contas,1,50-necessidades;contas
+2026-11-11,EXPENSE,Abastecimento Combustivel e Pedagio,420.00,BRL,Cartão de Crédito,Transporte & Combustível,1,50-necessidades;transporte
+2026-11-12,EXPENSE,Plano de Saude e Farmacia,550.00,BRL,Conta Corrente Principal,Saúde & Farmácia,1,50-necessidades;saude
+2026-11-12,EXPENSE,Jantar Restaurante Italiano Fim de Semana,320.00,BRL,Cartão de Crédito,Lazer & Restaurantes,1,30-desejos;restaurante
+2026-11-12,EXPENSE,Assinaturas Streaming (Netflix + Spotify),89.90,BRL,Cartão de Crédito,Lazer & Restaurantes,1,30-desejos;assinatura
+2026-11-12,EXPENSE,Notebook / Monitor Ultrawide (Parcelado),3600.00,BRL,Cartão de Crédito,Lazer & Restaurantes,6,30-desejos;eletronicos
+2026-11-29,EXPENSE,Passagem Aerea Ferias (Pos-Fechamento Cartao),2400.00,BRL,Cartão de Crédito,Lazer & Restaurantes,4,30-desejos;viagem
+2026-11-12,EXPENSE,Pos-Graduacao / Especializacao Tech,1800.00,BRL,Cartão de Crédito,Educação & Cursos,6,20-metas;educacao
+2026-11-15,EXPENSE,Aporte Tesouro Selic / Reserva de Emergencia,1500.00,BRL,Conta Corrente Principal,Educação & Cursos,1,20-metas;investimento

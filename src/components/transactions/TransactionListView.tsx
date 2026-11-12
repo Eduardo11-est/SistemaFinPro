@@ -22,8 +22,10 @@ import {
   Check,
   X,
   Calendar,
+  Upload,
 } from 'lucide-react';
-import { Account, Category, CostCenter, Transaction, TransactionType } from '@/types/finance';
+import { Account, Category, CostCenter, CurrencyType, Transaction, TransactionType } from '@/types/finance';
+import { projectInstallments } from '@/lib/credit-card';
 
 interface TransactionRowProps {
   tx: Transaction;
@@ -236,6 +238,7 @@ export function TransactionListView() {
     formatMoney,
     convertAmount,
     activeCurrency,
+    addTransactionsBatch,
     deleteTransaction,
     setEditingTransaction,
     setIsNewTransactionModalOpen,
@@ -421,6 +424,144 @@ export function TransactionListView() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }, [filteredTransactions, accountMap, categoryMap, currentWorkspace.name]);
+
+  // Import CSV (suporta tanto o arquivo de teste .docs/massa_teste_transacoes.csv quanto o CSV exportado)
+  const handleImportCSV = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = String(event.target?.result || '');
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (lines.length < 2) return;
+
+        const headerCols = lines[0]
+          .split(',')
+          .map((h) => h.replace(/^"|"$/g, '').trim().toLowerCase());
+
+        const idxDate = headerCols.findIndex((h) => h.includes('data'));
+        const idxType = headerCols.findIndex((h) => h.includes('tipo'));
+        const idxDesc = headerCols.findIndex((h) => h.includes('descri'));
+        const idxVal = headerCols.findIndex((h) => h.includes('valor'));
+        const idxCurr = headerCols.findIndex((h) => h.includes('moeda'));
+        const idxAcc = headerCols.findIndex((h) => h.includes('conta'));
+        const idxCat = headerCols.findIndex((h) => h.includes('categoria'));
+        const idxInst = headerCols.findIndex((h) => h.includes('parcela'));
+        const idxTags = headerCols.findIndex((h) => h.includes('tag'));
+
+        const defaultBankAcc =
+          accounts.find((a) => a.type !== 'CREDIT_CARD') || accounts[0];
+        const defaultCardAcc =
+          accounts.find((a) => a.type === 'CREDIT_CARD') || defaultBankAcc;
+
+        const batchToCreate: Omit<Transaction, 'id'>[] = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i]
+            .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+            .map((c) => c.replace(/^"|"$/g, '').trim());
+
+          const dateVal = cols[idxDate] || new Date().toISOString().split('T')[0];
+          const rawType = (cols[idxType] || 'EXPENSE').toUpperCase();
+          const txType: TransactionType =
+            rawType === 'INCOME' || rawType === 'TRANSFER' ? rawType : 'EXPENSE';
+          const descVal = cols[idxDesc] || 'Lançamento Importado';
+          const amountVal = parseFloat((cols[idxVal] || '0').replace(',', '.'));
+          if (!amountVal || amountVal <= 0) continue;
+
+          const currVal = ((cols[idxCurr] || 'BRL').toUpperCase() as CurrencyType) || 'BRL';
+          const accName = (cols[idxAcc] || '').toLowerCase();
+          const catName = (cols[idxCat] || '').toLowerCase();
+          const installmentsCount = Math.max(
+            1,
+            parseInt(cols[idxInst] || '1', 10) || 1
+          );
+          const rawTags = cols[idxTags] || '';
+          const tags = rawTags
+            .split(/[;,]/)
+            .map((t) => t.trim().toLowerCase())
+            .filter(Boolean);
+
+          // Resolve conta pelo nome ou pelo tipo (Cartão vs Conta Corrente)
+          const matchedAcc =
+            accounts.find((a) => a.name.toLowerCase() === accName) ||
+            (accName.includes('cart') ? defaultCardAcc : defaultBankAcc);
+
+          if (!matchedAcc) continue;
+
+          const matchedCat = categories.find(
+            (c) =>
+              c.name.toLowerCase() === catName ||
+              c.name.toLowerCase().includes(catName)
+          );
+
+          const isCard = matchedAcc.type === 'CREDIT_CARD';
+
+          if (installmentsCount > 1 || (isCard && txType === 'EXPENSE')) {
+            const projected = projectInstallments({
+              totalAmount: amountVal,
+              purchaseDateStr: dateVal,
+              totalInstallments: installmentsCount,
+              closingDay: matchedAcc.closingDay || 28,
+              dueDay: matchedAcc.dueDay || 5,
+              isCreditCard: isCard,
+            });
+            const grpId = `grp-csv-${Date.now()}-${i}`;
+            projected.forEach((p) => {
+              batchToCreate.push({
+                type: txType,
+                description:
+                  installmentsCount > 1
+                    ? `${descVal} (${p.installmentNumber}/${p.totalInstallments})`
+                    : descVal,
+                amount: p.amount,
+                date: p.dueDate,
+                status: 'COMPLETED',
+                paymentMethod: isCard ? 'Cartão de Crédito' : 'Importação CSV',
+                currency: currVal,
+                exchangeRate: 1,
+                isInstallment: installmentsCount > 1,
+                installmentNumber: installmentsCount > 1 ? p.installmentNumber : undefined,
+                totalInstallments: installmentsCount > 1 ? p.totalInstallments : undefined,
+                installmentGroupId: installmentsCount > 1 ? grpId : undefined,
+                tags,
+                workspaceId: currentWorkspace.id,
+                accountId: matchedAcc.id,
+                categoryId: matchedCat?.id,
+              });
+            });
+          } else {
+            batchToCreate.push({
+              type: txType,
+              description: descVal,
+              amount: amountVal,
+              date: dateVal,
+              status: 'COMPLETED',
+              paymentMethod: 'Importação CSV',
+              currency: currVal,
+              exchangeRate: 1,
+              tags,
+              workspaceId: currentWorkspace.id,
+              accountId: matchedAcc.id,
+              categoryId: matchedCat?.id,
+            });
+          }
+        }
+
+        if (batchToCreate.length > 0) {
+          addTransactionsBatch(batchToCreate);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    },
+    [accounts, categories, currentWorkspace.id, addTransactionsBatch]
+  );
 
   // Status de cores da barra de progresso do salário
   const isExceeded = monthlyOverview.usedPercentage >= 100;
@@ -765,6 +906,16 @@ export function TransactionListView() {
               </option>
             ))}
           </select>
+
+          {/* Botão Importar CSV */}
+          <label
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Importar Lançamentos de um arquivo CSV"
+          >
+            <Upload className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="hidden sm:inline">Importar CSV</span>
+            <input type="file" accept=".csv" className="hidden" onChange={handleImportCSV} />
+          </label>
 
           {/* Botão Exportar CSV */}
           <button
