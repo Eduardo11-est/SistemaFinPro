@@ -165,7 +165,7 @@ export function PayablesReceivablesView() {
                   return (
                     <tr
                       key={item.id}
-                      className="hover:bg-slate-50/70 dark:hover:bg-slate-850/50 transition-colors"
+                      className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       {/* Status & Tipo */}
                       <td className="py-3 px-4 whitespace-nowrap">
@@ -331,53 +331,53 @@ export function PayablesReceivablesView() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Descrição</label>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Descrição</label>
                 <input
                   type="text"
                   required
                   placeholder="Ex: Fornecedor Cloud, Fatura Consultoria"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Valor (R$)</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Valor (R$)</label>
                   <input
                     type="text"
                     required
                     placeholder="0,00"
                     value={amountStr}
                     onChange={(e) => setAmountStr(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Data de Vencimento</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Data de Vencimento</label>
                   <input
                     type="date"
                     required
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Fornecedor ou Cliente</label>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Fornecedor ou Cliente</label>
                 <input
                   type="text"
                   placeholder="Ex: AWS Amazon, Contabilidade Prime"
                   value={recipientOrPayer}
                   onChange={(e) => setRecipientOrPayer(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border space-y-2">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
                 <span className="text-[10px] font-bold uppercase text-slate-400 block">
                   Regras de Inadimplência
                 </span>
@@ -388,7 +388,7 @@ export function PayablesReceivablesView() {
                       type="text"
                       value={penaltyRate}
                       onChange={(e) => setPenaltyRate(e.target.value)}
-                      className="w-full px-2 py-1 rounded border text-xs"
+                      className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                     />
                   </div>
                   <div>
@@ -397,7 +397,7 @@ export function PayablesReceivablesView() {
                       type="text"
                       value={interestRateDaily}
                       onChange={(e) => setInterestRateDaily(e.target.value)}
-                      className="w-full px-2 py-1 rounded border text-xs"
+                      className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                     />
                   </div>
                 </div>

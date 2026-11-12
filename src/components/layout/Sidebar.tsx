@@ -136,7 +136,7 @@ export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }
       <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
         <div
           onClick={() => setActiveView('settings')}
-          className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer group"
+          className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">

@@ -62,7 +62,7 @@ export function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col justify-center items-center bg-slate-950 text-slate-100 relative overflow-hidden px-4 py-8">
+    <div className="min-h-screen w-full flex flex-col justify-center items-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative overflow-hidden px-4 py-8 transition-colors duration-200">
       {/* Background Glows */}
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -71,10 +71,10 @@ export function AuthScreen() {
       <div className="absolute top-6 right-6">
         <button
           onClick={toggleTheme}
-          className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white transition-all shadow-sm"
+          className="p-2.5 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
           title="Alternar Tema"
         >
-          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
         </button>
       </div>
 
@@ -84,21 +84,21 @@ export function AuthScreen() {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-indigo-600 shadow-xl shadow-emerald-500/25 mb-2">
             <DollarSign className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex items-center justify-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white flex items-center justify-center gap-2">
             <span>FinPro</span>
-            <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+            <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-mono">
               v1.0
             </span>
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400">
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
             Controle Financeiro Unificado • Pessoal & Múltiplos CNPJs
           </p>
         </div>
 
         {/* Card do Formulário */}
-        <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/90 border border-slate-800/80 shadow-2xl backdrop-blur-xl space-y-6">
+        <div className="p-6 sm:p-8 rounded-3xl bg-white/95 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 shadow-2xl backdrop-blur-xl space-y-6">
           {/* Seletor de Modo: Entrar / Criar Conta */}
-          <div className="grid grid-cols-2 p-1 rounded-xl bg-slate-950 border border-slate-800/80 text-xs font-semibold">
+          <div className="grid grid-cols-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 text-xs font-semibold">
             <button
               type="button"
               onClick={() => {
@@ -109,7 +109,7 @@ export function AuthScreen() {
               className={`py-2 rounded-lg transition-all ${
                 mode === 'LOGIN'
                   ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               Entrar
@@ -124,7 +124,7 @@ export function AuthScreen() {
               className={`py-2 rounded-lg transition-all ${
                 mode === 'REGISTER'
                   ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               Criar Conta
@@ -133,14 +133,14 @@ export function AuthScreen() {
 
           {/* Mensagens de Alerta / Erro */}
           {errorMessage && (
-            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start gap-2.5 animate-in fade-in">
+            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs flex items-start gap-2.5 animate-in fade-in">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{errorMessage}</span>
             </div>
           )}
 
           {successMessage && (
-            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-start gap-2.5 animate-in fade-in">
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-start gap-2.5 animate-in fade-in">
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{successMessage}</span>
             </div>
@@ -151,7 +151,7 @@ export function AuthScreen() {
             {mode === 'REGISTER' && (
               <>
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                  <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-slate-400" />
                     <span>Nome Completo</span>
                   </label>
@@ -161,12 +161,12 @@ export function AuthScreen() {
                     placeholder="Ex: Eduardo Santos"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                  <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <Building className="w-3.5 h-3.5 text-slate-400" />
                     <span>Nome do Espaço Inicial (Opcional)</span>
                   </label>
@@ -175,14 +175,14 @@ export function AuthScreen() {
                     placeholder="Ex: Meu Espaço Pessoal ou Minha Empresa"
                     value={workspaceName}
                     onChange={(e) => setWorkspaceName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
               </>
             )}
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Mail className="w-3.5 h-3.5 text-slate-400" />
                 <span>E-mail</span>
               </label>
@@ -192,12 +192,12 @@ export function AuthScreen() {
                 placeholder="seuemail@exemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+              <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5 text-slate-400" />
                   <span>Senha</span>
@@ -213,12 +213,12 @@ export function AuthScreen() {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors pr-10"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors pr-10"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -242,7 +242,7 @@ export function AuthScreen() {
           </form>
 
           {/* Destaque de Segurança */}
-          <div className="pt-2 border-t border-slate-800/60 flex items-center justify-center gap-2 text-[11px] text-slate-500">
+          <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800/60 flex items-center justify-center gap-2 text-[11px] text-slate-500">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
             <span>Banco de dados Neon PostgreSQL • Criptografia ativa</span>
           </div>

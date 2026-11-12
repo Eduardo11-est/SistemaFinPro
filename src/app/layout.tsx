@@ -4,7 +4,8 @@ import { FinanceProvider } from '@/lib/store';
 
 export const metadata: Metadata = {
   title: 'FinPro | Sistema de Controle Financeiro Integrado (Pessoal & Corporativo)',
-  description: 'Sistema unificado de gestão financeira pessoal e multiempresa com separação estrita de contextos, DRE gerencial, conciliação bancária e integração Neon PostgreSQL.',
+  description:
+    'Sistema unificado de gestão financeira pessoal e multiempresa com separação estrita de contextos, DRE gerencial e integração Neon PostgreSQL.',
 };
 
 export default function RootLayout({
@@ -13,11 +14,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" className="dark h-full antialiased">
-      <body className="min-h-full flex flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-white">
-        <FinanceProvider>
-          {children}
-        </FinanceProvider>
+    <html lang="pt-BR" className="dark h-full antialiased" suppressHydrationWarning>
+      <body className="min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 selection:bg-emerald-500 selection:text-white transition-colors">
+        <FinanceProvider>{children}</FinanceProvider>
       </body>
     </html>
   );

@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
+/* Habilita o seletor de classe .dark no Tailwind CSS v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
+    color-scheme: light;
     --background: #f8fafc;
     --foreground: #0f172a;
     --card: #ffffff;
@@ -14,6 +18,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: #090d16;
     --foreground: #f8fafc;
     --card: #0f172a;
@@ -24,6 +29,25 @@
     --muted: #1e293b;
     --muted-foreground: #94a3b8;
   }
+
+  /* Garante contraste legível em todos os campos, selects e opções nos modos claro e escuro */
+  input,
+  select,
+  textarea {
+    color: var(--foreground);
+  }
+
+  .dark select option,
+  .dark select optgroup {
+    background-color: #0f172a;
+    color: #f8fafc;
+  }
+
+  :root:not(.dark) select option,
+  :root:not(.dark) select optgroup {
+    background-color: #ffffff;
+    color: #0f172a;
+  }
 }
 
 body {
@@ -31,6 +55,13 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
   overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Seleção de texto sempre visível e com alto contraste */
+::selection {
+  background-color: #10b981;
+  color: #ffffff;
 }
 
 /* Custom Scrollbars */
@@ -44,23 +75,31 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #94a3b8;
   border-radius: 9999px;
 }
 
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
 ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
 
 /* Glassmorphism utility */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.light .glass-panel {
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }

@@ -287,7 +287,7 @@ export function SettingsAndNeonView() {
         </div>
 
         {/* Card de Status do Banco */}
-        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-850 space-y-3">
+        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span
@@ -417,7 +417,7 @@ export function SettingsAndNeonView() {
                 placeholder="Ex: Alfa Logística Ltda."
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg border text-xs bg-white dark:bg-slate-800"
+                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
             <div>
@@ -427,7 +427,7 @@ export function SettingsAndNeonView() {
                 placeholder="Ex: Alfa Transportes e Logística Ltda."
                 value={legalName}
                 onChange={(e) => setLegalName(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg border text-xs bg-white dark:bg-slate-800"
+                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
             <div>
@@ -437,7 +437,7 @@ export function SettingsAndNeonView() {
                 placeholder="00.000.000/0001-00"
                 value={documentCNPJ}
                 onChange={(e) => setDocumentCNPJ(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg border text-xs bg-white dark:bg-slate-800 font-mono"
+                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
               />
             </div>
           </div>

@@ -287,7 +287,7 @@ export function AccountsView() {
                       placeholder="5000"
                       value={creditLimit}
                       onChange={(e) => setCreditLimit(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-lg border text-xs"
+                      className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                     />
                   </div>
                   <div>
@@ -297,7 +297,7 @@ export function AccountsView() {
                       placeholder="28"
                       value={closingDay}
                       onChange={(e) => setClosingDay(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-lg border text-xs"
+                      className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                     />
                   </div>
                   <div>
@@ -307,7 +307,7 @@ export function AccountsView() {
                       placeholder="5"
                       value={dueDay}
                       onChange={(e) => setDueDay(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-lg border text-xs"
+                      className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                     />
                   </div>
                 </div>

@@ -303,7 +303,7 @@ export function BudgetsAndGoalsView() {
               placeholder="Ex: 500,00"
               value={contributionAmountStr}
               onChange={(e) => setContributionAmountStr(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border text-sm font-bold bg-white dark:bg-slate-800 mb-4"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white mb-4"
             />
             <div className="flex justify-end gap-2">
               <button
@@ -345,7 +345,7 @@ export function BudgetsAndGoalsView() {
                   placeholder="Ex: Carro Novo, Reserva, Viagem"
                   value={goalTitle}
                   onChange={(e) => setGoalTitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
               </div>
 
@@ -358,7 +358,7 @@ export function BudgetsAndGoalsView() {
                     placeholder="50000"
                     value={goalTargetStr}
                     onChange={(e) => setGoalTargetStr(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
                 <div>
@@ -368,7 +368,7 @@ export function BudgetsAndGoalsView() {
                     placeholder="10000"
                     value={goalCurrentStr}
                     onChange={(e) => setGoalCurrentStr(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
               </div>
@@ -379,11 +379,11 @@ export function BudgetsAndGoalsView() {
                   type="date"
                   value={goalDeadline}
                   onChange={(e) => setGoalDeadline(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border text-xs bg-white dark:bg-slate-800"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
               </div>
 
-              <div className="pt-3 border-t flex justify-end gap-2">
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsGoalModalOpen(false)}
