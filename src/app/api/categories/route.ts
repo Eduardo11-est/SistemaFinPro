@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { resolveRequestUserId, verifyWorkspaceAccess } from '@/lib/auth';
 import { sanitizeText, getSafeErrorMessage } from '@/lib/security';
 
 const DEFAULT_PERSONAL_CATEGORIES = [
@@ -24,7 +25,7 @@ const DEFAULT_CORPORATE_CATEGORIES = [
   { name: 'Impostos & Taxas (DAS / ISS / IRPJ)', type: 'EXPENSE' as const, icon: 'FileText', color: '#ef4444' },
   { name: 'Infraestrutura & Cloud / SaaS', type: 'EXPENSE' as const, icon: 'Server', color: '#0ea5e9' },
   { name: 'Marketing & Aquisição (Ads)', type: 'EXPENSE' as const, icon: 'Megaphone', color: '#f97316' },
-  { name: 'Administrativo & Contabilidade', type: 'EXPENSE' as const, icon: 'Building', color: '#f59e0b' },
+  { name: 'Administrativo & Contabilidade', type: 'EXPENSE' as const, icon: 'Building', color: '#f97316' },
   { name: 'Fornecedores & Operação', type: 'EXPENSE' as const, icon: 'Truck', color: '#8b5cf6' },
   { name: 'Despesas Bancárias & Tarifas', type: 'EXPENSE' as const, icon: 'CreditCard', color: '#64748b' },
 ];
@@ -33,11 +34,26 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const workspaceId = searchParams.get('workspaceId');
-    const where = workspaceId ? { workspaceId } : {};
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
+    const workspaceId = sanitizeText(searchParams.get('workspaceId'), 100);
+
+    if (!userId && !workspaceId) {
+      return NextResponse.json([]);
+    }
 
     let categories = await prisma.category.findMany({
-      where,
+      where: {
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(userId
+          ? {
+              workspace: {
+                members: {
+                  some: { userId },
+                },
+              },
+            }
+          : {}),
+      },
       include: {
         subcategories: true,
       },
@@ -81,6 +97,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
     const cleanName = sanitizeText(body.name, 80);
     const workspaceId = sanitizeText(body.workspaceId, 100);
 
@@ -89,6 +106,13 @@ export async function POST(req: Request) {
         { error: 'Nome e workspaceId são obrigatórios' },
         { status: 400 }
       );
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado a este workspace.' }, { status: 403 });
+      }
     }
 
     const category = await prisma.category.create({
@@ -117,9 +141,22 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
     const id = sanitizeText(searchParams.get('id'), 100);
     if (!id) {
       return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
+    }
+
+    const cat = await prisma.category.findUnique({ where: { id } });
+    if (!cat) {
+      return NextResponse.json({ error: 'Categoria não encontrada' }, { status: 404 });
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, cat.workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 });
+      }
     }
 
     await prisma.category.delete({ where: { id } });

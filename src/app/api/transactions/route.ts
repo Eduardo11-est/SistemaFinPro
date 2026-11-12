@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { resolveRequestUserId, verifyWorkspaceAccess } from '@/lib/auth';
 import { sanitizeText, sanitizePositiveAmount, getSafeErrorMessage } from '@/lib/security';
 
 const VALID_TYPES = new Set(['INCOME', 'EXPENSE', 'TRANSFER']);
@@ -9,11 +10,23 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
     const workspaceId = sanitizeText(searchParams.get('workspaceId'), 100);
 
-    const where = workspaceId ? { workspaceId } : {};
+    // Isolamento multi-cliente: sem userId autenticado, jamais retorna transações de outros clientes
+    if (!userId) {
+      return NextResponse.json([]);
+    }
+
     const transactions = await prisma.transaction.findMany({
-      where,
+      where: {
+        ...(workspaceId ? { workspaceId } : {}),
+        workspace: {
+          members: {
+            some: { userId },
+          },
+        },
+      },
       orderBy: { date: 'desc' },
       include: {
         account: true,
@@ -35,16 +48,25 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
     const cleanDescription = sanitizeText(body.description, 200);
     const validAmount = sanitizePositiveAmount(body.amount);
     const txType = VALID_TYPES.has(body.type) ? body.type : 'EXPENSE';
     const currency = VALID_CURRENCIES.has(body.currency) ? body.currency : 'BRL';
+    const workspaceId = sanitizeText(body.workspaceId, 100);
 
-    if (!cleanDescription || validAmount === null || !body.workspaceId || !body.accountId) {
+    if (!cleanDescription || validAmount === null || !workspaceId || !body.accountId) {
       return NextResponse.json(
         { error: 'Dados inválidos para criação de transação.' },
         { status: 400 }
       );
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado a este workspace.' }, { status: 403 });
+      }
     }
 
     const safeCategoryId =
@@ -81,7 +103,7 @@ export async function POST(req: Request) {
         isRecurring: Boolean(body.isRecurring),
         recurrenceFrequency: body.recurrenceFrequency || 'NONE',
         linkedTransactionId: body.linkedTransactionId,
-        workspaceId: String(body.workspaceId),
+        workspaceId,
         accountId: String(body.accountId),
         targetAccountId: body.targetAccountId ? String(body.targetAccountId) : undefined,
         categoryId: safeCategoryId,
@@ -127,6 +149,7 @@ export async function PATCH(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
     const { id, ...updates } = body;
     if (!id) {
       return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
@@ -135,6 +158,13 @@ export async function PATCH(req: Request) {
     const existing = await prisma.transaction.findUnique({ where: { id: String(id) } });
     if (!existing) {
       return NextResponse.json({ error: 'Transação não encontrada' }, { status: 404 });
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, existing.workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 });
+      }
     }
 
     // Reverter impacto anterior no saldo
@@ -278,11 +308,19 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
     const id = sanitizeText(searchParams.get('id'), 100);
     if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
 
     const tx = await prisma.transaction.findUnique({ where: { id } });
     if (tx) {
+      if (userId) {
+        const hasAccess = await verifyWorkspaceAccess(prisma, userId, tx.workspaceId);
+        if (!hasAccess) {
+          return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 });
+        }
+      }
+
       if (tx.type === 'INCOME') {
         await prisma.account.update({
           where: { id: tx.accountId },

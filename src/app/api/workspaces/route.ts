@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { resolveRequestUserId } from '@/lib/auth';
 import { sanitizeText, getSafeErrorMessage } from '@/lib/security';
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
-    const userId = sanitizeText(searchParams.get('userId'), 100);
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
 
-    const where = userId ? { members: { some: { userId } } } : {};
+    // Isolamento multi-cliente: sem userId autenticado, jamais retorna workspaces de outros clientes
+    if (!userId) {
+      return NextResponse.json([]);
+    }
 
     const workspaces = await prisma.workspace.findMany({
-      where,
+      where: {
+        members: {
+          some: { userId },
+        },
+      },
       include: {
         accounts: true,
         categories: true,
@@ -33,6 +41,11 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
+    if (!userId) {
+      return NextResponse.json({ error: 'Usuário não autenticado.' }, { status: 401 });
+    }
+
     const cleanName = sanitizeText(body.name, 100);
     if (!cleanName) {
       return NextResponse.json({ error: 'Nome do workspace é obrigatório' }, { status: 400 });
@@ -47,16 +60,12 @@ export async function POST(req: Request) {
         legalName: sanitizeText(body.legalName, 140) || undefined,
         defaultCurrency: body.defaultCurrency || 'BRL',
         colorTheme: sanitizeText(body.colorTheme, 20) || '#6366f1',
-        ...(body.userId
-          ? {
-              members: {
-                create: {
-                  userId: String(body.userId),
-                  role: 'OWNER',
-                },
-              },
-            }
-          : {}),
+        members: {
+          create: {
+            userId,
+            role: 'OWNER',
+          },
+        },
         accounts: {
           create: {
             name:

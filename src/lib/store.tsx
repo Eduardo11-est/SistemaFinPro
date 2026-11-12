@@ -126,7 +126,16 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-const STORAGE_KEY_PREFIX = 'finpro_store_v2_';
+const STORAGE_KEY_PREFIX = 'finpro_store_v3_';
+
+/**
+ * Gera chave de armazenamento isolada por usuário (Multi-Tenant no navegador).
+ * Garante que um cliente jamais veja cache de outro cliente no mesmo dispositivo.
+ */
+function getUserStorageKey(userId: string | null | undefined, key: string): string {
+  const scope = userId ? `u_${userId}` : 'guest';
+  return `${STORAGE_KEY_PREFIX}${scope}_${key}`;
+}
 
 const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
   USD_BRL: 5.65,
@@ -163,6 +172,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentUserIdRef.current = currentUser?.id ?? null;
+  }, [currentUser]);
+
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
 
   // Workspaces
@@ -181,18 +195,20 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [activeView, setActiveView] = useState<string>('dashboard');
   const [currentMonthPrefix, setCurrentMonthPrefix] = useState<string>('2026-11');
 
-  // Data states
-  const [accounts, setAccounts] = useState<Account[]>(INITIAL_ACCOUNTS);
-  const [categories, setCategories] = useState<Category[]>(INITIAL_CATEGORIES);
+  // Data states (isolados por cliente)
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState<boolean>(false);
   const [costCenters, setCostCenters] = useState<CostCenter[]>(INITIAL_COST_CENTERS);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [isTransactionsLoading, setIsTransactionsLoading] = useState<boolean>(false);
-  const [payablesReceivables, setPayablesReceivables] = useState<PayableReceivable[]>(INITIAL_PAYABLES_RECEIVABLES);
+  const [payablesReceivables, setPayablesReceivables] = useState<PayableReceivable[]>(
+    INITIAL_PAYABLES_RECEIVABLES
+  );
   const [budgets] = useState<Budget[]>(INITIAL_BUDGETS);
   const [goals, setGoals] = useState<Goal[]>(INITIAL_GOALS);
 
-  // Salary per workspace
+  // Salary per workspace (isolado por cliente)
   const [salariesByWorkspace, setSalariesByWorkspace] = useState<Record<string, number>>({});
 
   // Modals & Editing state
@@ -217,13 +233,66 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  /**
+   * Limpa imediatamente todos os dados em memória para impedir qualquer vazamento
+   * visual ao trocar de conta de usuário.
+   */
+  const resetClientDataState = useCallback(() => {
+    syncedCategoryWorkspacesRef.current.clear();
+    setWorkspaces([]);
+    setAccounts([]);
+    setCategories([]);
+    setCostCenters([]);
+    setTransactions([]);
+    setPayablesReceivables([]);
+    setGoals([]);
+    setSalariesByWorkspace({});
+  }, []);
+
+  /**
+   * Hidrata o cache local exclusivo daquele usuário específico (se existir)
+   */
+  const hydrateUserCache = useCallback((userId: string) => {
+    try {
+      const savedWs = localStorage.getItem(getUserStorageKey(userId, 'ws'));
+      if (savedWs) {
+        currentWorkspaceIdRef.current = savedWs;
+        setCurrentWorkspaceId(savedWs);
+      }
+
+      const savedTx = localStorage.getItem(getUserStorageKey(userId, 'tx'));
+      setTransactions(savedTx ? JSON.parse(savedTx) : []);
+
+      const savedAcc = localStorage.getItem(getUserStorageKey(userId, 'acc'));
+      setAccounts(savedAcc ? JSON.parse(savedAcc) : []);
+
+      const savedCat = localStorage.getItem(getUserStorageKey(userId, 'cat'));
+      setCategories(savedCat ? JSON.parse(savedCat) : []);
+
+      const savedPay = localStorage.getItem(getUserStorageKey(userId, 'pay'));
+      setPayablesReceivables(savedPay ? JSON.parse(savedPay) : []);
+
+      const savedSalaries = localStorage.getItem(getUserStorageKey(userId, 'salaries'));
+      setSalariesByWorkspace(savedSalaries ? JSON.parse(savedSalaries) : {});
+
+      const savedGoals = localStorage.getItem(getUserStorageKey(userId, 'goals'));
+      setGoals(savedGoals ? JSON.parse(savedGoals) : []);
+    } catch {}
+  }, []);
+
   const refreshCategories = useCallback(async (targetWorkspaceId?: string) => {
     const wsId = targetWorkspaceId || currentWorkspaceIdRef.current;
-    if (!wsId) return;
+    const uid = currentUserIdRef.current;
+    if (!wsId || !uid) return;
 
     setIsCategoriesLoading(true);
     try {
-      const res = await fetch(`/api/categories?workspaceId=${encodeURIComponent(wsId)}`);
+      const res = await fetch(
+        `/api/categories?workspaceId=${encodeURIComponent(wsId)}&userId=${encodeURIComponent(uid)}`,
+        {
+          headers: { 'x-user-id': uid },
+        }
+      );
       if (res.ok) {
         const fetchedCats: Category[] = await res.json();
         if (Array.isArray(fetchedCats) && fetchedCats.length > 0) {
@@ -232,22 +301,22 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             const otherWsCats = prev.filter((c) => c.workspaceId !== wsId);
             const merged = [...otherWsCats, ...fetchedCats];
             try {
-              localStorage.setItem(`${STORAGE_KEY_PREFIX}cat`, JSON.stringify(merged));
+              localStorage.setItem(getUserStorageKey(uid, 'cat'), JSON.stringify(merged));
             } catch {}
             return merged;
           });
-          return;
         }
       }
     } catch {
-      // Fallback para categorias locais se offline
+      // Fallback silencioso
     } finally {
       setIsCategoriesLoading(false);
     }
   }, []);
 
-  // Sincronização otimizada e sem loops redundantes com o Neon PostgreSQL
-  const loadFromNeon = useCallback(async (userId?: string) => {
+  // Sincronização 100% isolada por userId com o Neon PostgreSQL
+  const loadFromNeon = useCallback(async (userId: string) => {
+    if (!userId) return;
     if (inFlightSyncRef.current) {
       return inFlightSyncRef.current;
     }
@@ -256,13 +325,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       setIsTransactionsLoading(true);
       setIsCategoriesLoading(true);
       try {
-        const userParam = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+        const userParam = `?userId=${encodeURIComponent(userId)}`;
+        const headers = { 'x-user-id': userId };
+
         const [wsRes, accRes, catRes, txRes, payRes] = await Promise.all([
-          fetch(`/api/workspaces${userParam}`).then((r) => (r.ok ? r.json() : null)),
-          fetch('/api/accounts').then((r) => (r.ok ? r.json() : null)),
-          fetch('/api/categories').then((r) => (r.ok ? r.json() : null)),
-          fetch('/api/transactions').then((r) => (r.ok ? r.json() : null)),
-          fetch('/api/payables').then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/workspaces${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/accounts${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/categories${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/transactions${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/payables${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         ]);
 
         let activeWsId = currentWorkspaceIdRef.current;
@@ -274,30 +345,26 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             currentWorkspaceIdRef.current = activeWsId;
             setCurrentWorkspaceId(activeWsId);
             try {
-              localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, activeWsId);
+              localStorage.setItem(getUserStorageKey(userId, 'ws'), activeWsId);
             } catch {}
           }
 
-          // Extrair centros de custo embutidos, se existirem
           const embeddedCostCenters: CostCenter[] = [];
           wsRes.forEach((w: Workspace & { costCenters?: CostCenter[] }) => {
             if (Array.isArray(w.costCenters)) {
               embeddedCostCenters.push(...w.costCenters);
             }
           });
-          if (embeddedCostCenters.length > 0) {
-            setCostCenters(embeddedCostCenters);
-          }
+          setCostCenters(embeddedCostCenters);
         }
 
         if (accRes && Array.isArray(accRes)) {
           setAccounts(accRes);
           try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(accRes));
+            localStorage.setItem(getUserStorageKey(userId, 'acc'), JSON.stringify(accRes));
           } catch {}
         }
 
-        // Categorias: usa /api/categories ou categorias aninhadas nos workspaces
         let resolvedCategories: Category[] = [];
         if (catRes && Array.isArray(catRes) && catRes.length > 0) {
           resolvedCategories = catRes;
@@ -309,11 +376,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           });
         }
 
-        // Se o workspace ativo ainda não tiver categorias no banco, solicita seed via endpoint específico
         if (activeWsId && !resolvedCategories.some((c) => c.workspaceId === activeWsId)) {
           try {
             const seededRes = await fetch(
-              `/api/categories?workspaceId=${encodeURIComponent(activeWsId)}`
+              `/api/categories?workspaceId=${encodeURIComponent(activeWsId)}&userId=${encodeURIComponent(userId)}`,
+              { headers }
             );
             if (seededRes.ok) {
               const seededCats: Category[] = await seededRes.json();
@@ -331,7 +398,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           resolvedCategories.forEach((c) => syncedCategoryWorkspacesRef.current.add(c.workspaceId));
           setCategories(resolvedCategories);
           try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}cat`, JSON.stringify(resolvedCategories));
+            localStorage.setItem(
+              getUserStorageKey(userId, 'cat'),
+              JSON.stringify(resolvedCategories)
+            );
           } catch {}
         }
 
@@ -342,7 +412,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           }));
           setTransactions(mappedTx);
           try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(mappedTx));
+            localStorage.setItem(getUserStorageKey(userId, 'tx'), JSON.stringify(mappedTx));
           } catch {}
         }
 
@@ -352,9 +422,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             dueDate: typeof p.dueDate === 'string' ? p.dueDate.split('T')[0] : p.dueDate,
           }));
           setPayablesReceivables(mappedPay);
+          try {
+            localStorage.setItem(getUserStorageKey(userId, 'pay'), JSON.stringify(mappedPay));
+          } catch {}
         }
       } catch (err) {
-        console.info('Carregando base local:', err);
+        console.info('Carregando base local do usuário:', err);
       } finally {
         setIsTransactionsLoading(false);
         setIsCategoriesLoading(false);
@@ -369,7 +442,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   // Load persisted state from localStorage once on mount
   useEffect(() => {
     try {
-      const savedTheme = localStorage.getItem(`${STORAGE_KEY_PREFIX}theme`) as 'dark' | 'light' | null;
+      const savedTheme = localStorage.getItem(`${STORAGE_KEY_PREFIX}theme`) as
+        | 'dark'
+        | 'light'
+        | null;
       if (savedTheme) {
         setTheme(savedTheme);
         if (savedTheme === 'dark') {
@@ -381,54 +457,28 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         document.documentElement.classList.add('dark');
       }
 
-      const savedUserStr = localStorage.getItem(`${STORAGE_KEY_PREFIX}user`);
+      const now = new Date();
+      setCurrentMonthPrefix(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+
+      const savedUserStr = localStorage.getItem(`${STORAGE_KEY_PREFIX}active_user`);
       let userObj: AuthUser | null = null;
       if (savedUserStr) {
         try {
           userObj = JSON.parse(savedUserStr);
-          setCurrentUser(userObj);
+          if (userObj?.id) {
+            currentUserIdRef.current = userObj.id;
+            setCurrentUser(userObj);
+            hydrateUserCache(userObj.id);
+            loadFromNeon(userObj.id);
+          }
         } catch {}
-      }
-
-      const savedWs = localStorage.getItem(`${STORAGE_KEY_PREFIX}ws`);
-      if (savedWs) {
-        currentWorkspaceIdRef.current = savedWs;
-        setCurrentWorkspaceId(savedWs);
-      }
-
-      const savedTx = localStorage.getItem(`${STORAGE_KEY_PREFIX}tx`);
-      if (savedTx) setTransactions(JSON.parse(savedTx));
-
-      const savedAcc = localStorage.getItem(`${STORAGE_KEY_PREFIX}acc`);
-      if (savedAcc) setAccounts(JSON.parse(savedAcc));
-
-      const savedCat = localStorage.getItem(`${STORAGE_KEY_PREFIX}cat`);
-      if (savedCat) {
-        const parsedCat = JSON.parse(savedCat);
-        if (Array.isArray(parsedCat) && parsedCat.length > 0) {
-          setCategories(parsedCat);
-        }
-      }
-
-      const savedSalaries = localStorage.getItem(`${STORAGE_KEY_PREFIX}salaries`);
-      if (savedSalaries) {
-        try {
-          setSalariesByWorkspace(JSON.parse(savedSalaries));
-        } catch {}
-      }
-
-      const now = new Date();
-      setCurrentMonthPrefix(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
-
-      if (userObj) {
-        loadFromNeon(userObj.id);
       }
     } catch {
       // Ignora erro no SSR
     } finally {
       setIsAuthLoading(false);
     }
-  }, [loadFromNeon]);
+  }, [hydrateUserCache, loadFromNeon]);
 
   // Quando o usuário troca de workspace, garante que as categorias daquele workspace estejam populadas
   useEffect(() => {
@@ -453,10 +503,20 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           return { success: false, error: data.error || 'Erro ao realizar login' };
         }
 
-        setCurrentUser(data.user);
+        // Limpa estado anterior antes de carregar os dados exclusivos deste cliente
+        resetClientDataState();
+
+        const loggedUser: AuthUser = data.user;
+        currentUserIdRef.current = loggedUser.id;
+        setCurrentUser(loggedUser);
+        setActiveView('dashboard');
+
         try {
-          localStorage.setItem(`${STORAGE_KEY_PREFIX}user`, JSON.stringify(data.user));
+          localStorage.setItem(`${STORAGE_KEY_PREFIX}active_user`, JSON.stringify(loggedUser));
         } catch {}
+
+        // Hidrata configurações locais exclusivas deste usuário (ex: salário configurado, metas)
+        hydrateUserCache(loggedUser.id);
 
         if (data.workspaces && data.workspaces.length > 0) {
           setWorkspaces(data.workspaces);
@@ -464,32 +524,45 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           currentWorkspaceIdRef.current = firstWsId;
           setCurrentWorkspaceId(firstWsId);
           try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, firstWsId);
+            localStorage.setItem(getUserStorageKey(loggedUser.id, 'ws'), firstWsId);
           } catch {}
 
-          // Extrair categorias já vindas no login para resposta imediata
+          const loginAccounts: Account[] = [];
           const loginCats: Category[] = [];
-          data.workspaces.forEach((w: Workspace & { categories?: Category[] }) => {
-            if (Array.isArray(w.categories)) {
-              loginCats.push(...w.categories);
+          data.workspaces.forEach(
+            (w: Workspace & { accounts?: Account[]; categories?: Category[] }) => {
+              if (Array.isArray(w.accounts)) loginAccounts.push(...w.accounts);
+              if (Array.isArray(w.categories)) loginCats.push(...w.categories);
             }
-          });
+          );
+          if (loginAccounts.length > 0) {
+            setAccounts(loginAccounts);
+            try {
+              localStorage.setItem(
+                getUserStorageKey(loggedUser.id, 'acc'),
+                JSON.stringify(loginAccounts)
+              );
+            } catch {}
+          }
           if (loginCats.length > 0) {
             setCategories(loginCats);
             try {
-              localStorage.setItem(`${STORAGE_KEY_PREFIX}cat`, JSON.stringify(loginCats));
+              localStorage.setItem(
+                getUserStorageKey(loggedUser.id, 'cat'),
+                JSON.stringify(loginCats)
+              );
             } catch {}
           }
         }
 
-        await loadFromNeon(data.user.id);
+        await loadFromNeon(loggedUser.id);
         return { success: true };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Erro de conexão';
         return { success: false, error: msg };
       }
     },
-    [loadFromNeon]
+    [hydrateUserCache, loadFromNeon, resetClientDataState]
   );
 
   const register = useCallback(
@@ -505,9 +578,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           return { success: false, error: data.error || 'Erro ao criar conta' };
         }
 
-        setCurrentUser(data.user);
+        // Limpa qualquer estado anterior para iniciar a conta 100% zerada e exclusiva
+        resetClientDataState();
+
+        const newUser: AuthUser = data.user;
+        currentUserIdRef.current = newUser.id;
+        setCurrentUser(newUser);
+        setActiveView('dashboard');
+
         try {
-          localStorage.setItem(`${STORAGE_KEY_PREFIX}user`, JSON.stringify(data.user));
+          localStorage.setItem(`${STORAGE_KEY_PREFIX}active_user`, JSON.stringify(newUser));
         } catch {}
 
         if (data.workspace) {
@@ -515,39 +595,48 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           currentWorkspaceIdRef.current = data.workspace.id;
           setCurrentWorkspaceId(data.workspace.id);
           try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, data.workspace.id);
+            localStorage.setItem(getUserStorageKey(newUser.id, 'ws'), data.workspace.id);
           } catch {}
+
+          if (Array.isArray(data.workspace.accounts)) {
+            setAccounts(data.workspace.accounts);
+            try {
+              localStorage.setItem(
+                getUserStorageKey(newUser.id, 'acc'),
+                JSON.stringify(data.workspace.accounts)
+              );
+            } catch {}
+          }
+          if (Array.isArray(data.workspace.categories)) {
+            setCategories(data.workspace.categories);
+            try {
+              localStorage.setItem(
+                getUserStorageKey(newUser.id, 'cat'),
+                JSON.stringify(data.workspace.categories)
+              );
+            } catch {}
+          }
         }
 
-        await loadFromNeon(data.user.id);
+        await loadFromNeon(newUser.id);
         return { success: true };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Erro de conexão';
         return { success: false, error: msg };
       }
     },
-    [loadFromNeon]
+    [loadFromNeon, resetClientDataState]
   );
 
   const logout = useCallback(() => {
+    currentUserIdRef.current = null;
     setCurrentUser(null);
-    syncedCategoryWorkspacesRef.current.clear();
+    resetClientDataState();
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     try {
-      localStorage.removeItem(`${STORAGE_KEY_PREFIX}user`);
-      localStorage.removeItem(`${STORAGE_KEY_PREFIX}ws`);
-      localStorage.removeItem(`${STORAGE_KEY_PREFIX}tx`);
-      localStorage.removeItem(`${STORAGE_KEY_PREFIX}acc`);
-      localStorage.removeItem(`${STORAGE_KEY_PREFIX}cat`);
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}active_user`);
     } catch {}
-    setTransactions([]);
-    setPayablesReceivables([]);
-    setAccounts(INITIAL_ACCOUNTS);
-    setCategories(INITIAL_CATEGORIES);
-    setWorkspaces(INITIAL_WORKSPACES);
-    currentWorkspaceIdRef.current = 'ws-personal';
-    setCurrentWorkspaceId('ws-personal');
-  }, []);
+  }, [resetClientDataState]);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -567,9 +656,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const handleSetWorkspace = useCallback((id: string) => {
     currentWorkspaceIdRef.current = id;
     setCurrentWorkspaceId(id);
-    try {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, id);
-    } catch {}
+    const uid = currentUserIdRef.current;
+    if (uid) {
+      try {
+        localStorage.setItem(getUserStorageKey(uid, 'ws'), id);
+      } catch {}
+    }
   }, []);
 
   const currentWorkspace = useMemo(() => {
@@ -580,25 +672,25 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     );
   }, [workspaces, currentWorkspaceId]);
 
-  // Salary getter & setter
+  // Salary getter & setter (persistido por usuário e workspace)
   const monthlySalary = useMemo(() => {
     return salariesByWorkspace[currentWorkspaceId] || 0;
   }, [salariesByWorkspace, currentWorkspaceId]);
 
-  const setMonthlySalary = useCallback(
-    (amount: number, workspaceId?: string) => {
-      const targetWs = workspaceId || currentWorkspaceIdRef.current;
-      const sanitized = Math.max(0, Number(amount) || 0);
-      setSalariesByWorkspace((prev) => {
-        const next = { ...prev, [targetWs]: sanitized };
+  const setMonthlySalary = useCallback((amount: number, workspaceId?: string) => {
+    const targetWs = workspaceId || currentWorkspaceIdRef.current;
+    const uid = currentUserIdRef.current;
+    const sanitized = Math.max(0, Number(amount) || 0);
+    setSalariesByWorkspace((prev) => {
+      const next = { ...prev, [targetWs]: sanitized };
+      if (uid) {
         try {
-          localStorage.setItem(`${STORAGE_KEY_PREFIX}salaries`, JSON.stringify(next));
+          localStorage.setItem(getUserStorageKey(uid, 'salaries'), JSON.stringify(next));
         } catch {}
-        return next;
-      });
-    },
-    []
-  );
+      }
+      return next;
+    });
+  }, []);
 
   // Currency converter
   const convertAmount = useCallback(
@@ -643,8 +735,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const currentCategories = useMemo(() => {
     const wsCats = categories.filter((c) => c.workspaceId === currentWorkspaceId);
     if (wsCats.length > 0) return wsCats;
-    // Se ainda não houver categorias salvas para o workspace atual e não estiver carregando do banco,
-    // disponibiliza as categorias padrão ativas para o contexto atual
     if (!isCategoriesLoading) {
       return buildDefaultCategoriesForWorkspace(currentWorkspaceId, currentWorkspace?.type);
     }
@@ -673,31 +763,39 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Account actions
   const addAccount = useCallback((acc: Omit<Account, 'id'>) => {
+    const uid = currentUserIdRef.current;
     const newAcc: Account = {
       ...acc,
       id: `acc-${Date.now()}`,
     };
     setAccounts((prev) => {
       const updated = [...prev, newAcc];
-      try {
-        localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(updated));
-      } catch {}
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(updated));
+        } catch {}
+      }
       return updated;
     });
 
     fetch('/api/accounts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newAcc),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(uid ? { 'x-user-id': uid } : {}),
+      },
+      body: JSON.stringify({ ...newAcc, userId: uid }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((created) => {
         if (created?.id) {
           setAccounts((prev) => {
             const updated = prev.map((a) => (a.id === newAcc.id ? created : a));
-            try {
-              localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(updated));
-            } catch {}
+            if (uid) {
+              try {
+                localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(updated));
+              } catch {}
+            }
             return updated;
           });
         }
@@ -706,45 +804,65 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateAccount = useCallback((id: string, updates: Partial<Account>) => {
+    const uid = currentUserIdRef.current;
     setAccounts((prev) => {
       const updated = prev.map((a) => (a.id === id ? { ...a, ...updates } : a));
-      try {
-        localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(updated));
-      } catch {}
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(updated));
+        } catch {}
+      }
       return updated;
     });
   }, []);
 
   const deleteAccount = useCallback((id: string) => {
-    setAccounts((prev) => prev.filter((a) => a.id !== id));
+    const uid = currentUserIdRef.current;
+    setAccounts((prev) => {
+      const updated = prev.filter((a) => a.id !== id);
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
   }, []);
 
   // Category & Workspace actions
   const addCategory = useCallback(async (cat: Omit<Category, 'id'>): Promise<Category> => {
+    const uid = currentUserIdRef.current;
     const tempId = `cat-local-${Date.now()}`;
     const optimisticCat: Category = { ...cat, id: tempId };
 
     setCategories((prev) => {
       const updated = [...prev, optimisticCat];
-      try {
-        localStorage.setItem(`${STORAGE_KEY_PREFIX}cat`, JSON.stringify(updated));
-      } catch {}
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'cat'), JSON.stringify(updated));
+        } catch {}
+      }
       return updated;
     });
 
     try {
       const res = await fetch('/api/categories', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cat),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-id': uid } : {}),
+        },
+        body: JSON.stringify({ ...cat, userId: uid }),
       });
       if (res.ok) {
         const created: Category = await res.json();
         setCategories((prev) => {
           const updated = prev.map((c) => (c.id === tempId ? created : c));
-          try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}cat`, JSON.stringify(updated));
-          } catch {}
+          if (uid) {
+            try {
+              localStorage.setItem(getUserStorageKey(uid, 'cat'), JSON.stringify(updated));
+            } catch {}
+          }
           return updated;
         });
         return created;
@@ -755,69 +873,80 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteCategory = useCallback((id: string) => {
+    const uid = currentUserIdRef.current;
     setCategories((prev) => {
       const updated = prev.filter((c) => c.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY_PREFIX}cat`, JSON.stringify(updated));
-      } catch {}
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'cat'), JSON.stringify(updated));
+        } catch {}
+      }
       return updated;
     });
 
-    fetch(`/api/categories?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }).catch(() => {});
+    fetch(
+      `/api/categories?id=${encodeURIComponent(id)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`,
+      {
+        method: 'DELETE',
+        headers: uid ? { 'x-user-id': uid } : undefined,
+      }
+    ).catch(() => {});
   }, []);
 
-  const addWorkspace = useCallback(
-    (ws: Omit<Workspace, 'id' | 'createdAt'>) => {
-      const tempId = `ws-${Date.now()}`;
-      const newWs: Workspace = {
-        ...ws,
-        id: tempId,
-        createdAt: new Date().toISOString(),
-      };
-      const defaultCats = buildDefaultCategoriesForWorkspace(tempId, ws.type);
+  const addWorkspace = useCallback((ws: Omit<Workspace, 'id' | 'createdAt'>) => {
+    const uid = currentUserIdRef.current;
+    const tempId = `ws-${Date.now()}`;
+    const newWs: Workspace = {
+      ...ws,
+      id: tempId,
+      createdAt: new Date().toISOString(),
+    };
+    const defaultCats = buildDefaultCategoriesForWorkspace(tempId, ws.type);
 
-      setWorkspaces((prev) => [...prev, newWs]);
-      setCategories((prev) => [...prev, ...defaultCats]);
-      currentWorkspaceIdRef.current = newWs.id;
-      setCurrentWorkspaceId(newWs.id);
+    setWorkspaces((prev) => [...prev, newWs]);
+    setCategories((prev) => [...prev, ...defaultCats]);
+    currentWorkspaceIdRef.current = newWs.id;
+    setCurrentWorkspaceId(newWs.id);
 
-      fetch('/api/workspaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newWs, userId: currentUser?.id }),
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((createdWs) => {
-          if (createdWs?.id) {
-            setWorkspaces((prev) => prev.map((w) => (w.id === tempId ? createdWs : w)));
-            if (Array.isArray(createdWs.accounts) && createdWs.accounts.length > 0) {
-              setAccounts((prev) => [...prev, ...createdWs.accounts]);
-            }
-            if (Array.isArray(createdWs.categories) && createdWs.categories.length > 0) {
-              setCategories((prev) => [
-                ...prev.filter((c) => c.workspaceId !== tempId),
-                ...createdWs.categories,
-              ]);
-            }
-            if (currentWorkspaceIdRef.current === tempId) {
-              currentWorkspaceIdRef.current = createdWs.id;
-              setCurrentWorkspaceId(createdWs.id);
+    fetch('/api/workspaces', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(uid ? { 'x-user-id': uid } : {}),
+      },
+      body: JSON.stringify({ ...newWs, userId: uid }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((createdWs) => {
+        if (createdWs?.id) {
+          setWorkspaces((prev) => prev.map((w) => (w.id === tempId ? createdWs : w)));
+          if (Array.isArray(createdWs.accounts) && createdWs.accounts.length > 0) {
+            setAccounts((prev) => [...prev, ...createdWs.accounts]);
+          }
+          if (Array.isArray(createdWs.categories) && createdWs.categories.length > 0) {
+            setCategories((prev) => [
+              ...prev.filter((c) => c.workspaceId !== tempId),
+              ...createdWs.categories,
+            ]);
+          }
+          if (currentWorkspaceIdRef.current === tempId) {
+            currentWorkspaceIdRef.current = createdWs.id;
+            setCurrentWorkspaceId(createdWs.id);
+            if (uid) {
               try {
-                localStorage.setItem(`${STORAGE_KEY_PREFIX}ws`, createdWs.id);
+                localStorage.setItem(getUserStorageKey(uid, 'ws'), createdWs.id);
               } catch {}
             }
           }
-        })
-        .catch(() => {});
-    },
-    [currentUser?.id]
-  );
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Transaction Actions with Inter-Context Awareness (Golden Rule!)
   const addTransaction = useCallback(
     (tx: Omit<Transaction, 'id'>) => {
+      const uid = currentUserIdRef.current;
       const txId = `tx-${Date.now()}`;
       const newTx: Transaction = { ...tx, id: txId };
 
@@ -838,13 +967,14 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           }
           return acc;
         });
-        try {
-          localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(updated));
-        } catch {}
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(updated));
+          } catch {}
+        }
         return updated;
       });
 
-      // Check if this is an inter-context operation (e.g. Pró-labore withdrawal from Corporate to Personal)
       const extraTransactions: Transaction[] = [];
       if (newTx.linkedWorkspaceId && newTx.tags.includes('pro-labore')) {
         const personalAccount = accounts.find((a) => a.workspaceId === newTx.linkedWorkspaceId);
@@ -883,16 +1013,21 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
       setTransactions((prev) => {
         const updated = [newTx, ...extraTransactions, ...prev];
-        try {
-          localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(updated));
-        } catch {}
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+          } catch {}
+        }
         return updated;
       });
 
       fetch('/api/transactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTx),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-id': uid } : {}),
+        },
+        body: JSON.stringify({ ...newTx, userId: uid }),
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((created) => {
@@ -906,9 +1041,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
                     }
                   : t
               );
-              try {
-                localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(updated));
-              } catch {}
+              if (uid) {
+                try {
+                  localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+                } catch {}
+              }
               return updated;
             });
           }
@@ -919,18 +1056,17 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
+    const uid = currentUserIdRef.current;
     setTransactions((prev) => {
       const existing = prev.find((t) => t.id === id);
       if (!existing) return prev;
 
       const updatedTx: Transaction = { ...existing, ...updates };
 
-      // Ajustar saldos das contas caso valor, tipo ou conta tenham sido alterados
       setAccounts((accs) => {
         const nextAccs = accs.map((acc) => {
           let balance = acc.currentBalance;
 
-          // Reverter impacto antigo
           if (acc.id === existing.accountId) {
             if (existing.type === 'INCOME') balance -= existing.amount;
             else if (existing.type === 'EXPENSE' || existing.type === 'TRANSFER')
@@ -940,7 +1076,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             balance -= existing.amount;
           }
 
-          // Aplicar novo impacto
           if (acc.id === updatedTx.accountId) {
             if (updatedTx.type === 'INCOME') balance += updatedTx.amount;
             else if (updatedTx.type === 'EXPENSE' || updatedTx.type === 'TRANSFER')
@@ -953,27 +1088,35 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           return balance !== acc.currentBalance ? { ...acc, currentBalance: balance } : acc;
         });
 
-        try {
-          localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(nextAccs));
-        } catch {}
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(nextAccs));
+          } catch {}
+        }
         return nextAccs;
       });
 
       const updatedList = prev.map((t) => (t.id === id ? updatedTx : t));
-      try {
-        localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(updatedList));
-      } catch {}
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updatedList));
+        } catch {}
+      }
       return updatedList;
     });
 
     fetch('/api/transactions', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...updates }),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(uid ? { 'x-user-id': uid } : {}),
+      },
+      body: JSON.stringify({ id, ...updates, userId: uid }),
     }).catch(() => {});
   }, []);
 
   const deleteTransaction = useCallback((id: string) => {
+    const uid = currentUserIdRef.current;
     setTransactions((prev) => {
       const tx = prev.find((t) => t.id === id);
       if (tx) {
@@ -992,41 +1135,62 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             }
             return acc;
           });
-          try {
-            localStorage.setItem(`${STORAGE_KEY_PREFIX}acc`, JSON.stringify(nextAccs));
-          } catch {}
+          if (uid) {
+            try {
+              localStorage.setItem(getUserStorageKey(uid, 'acc'), JSON.stringify(nextAccs));
+            } catch {}
+          }
           return nextAccs;
         });
       }
       const updated = prev.filter((t) => t.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY_PREFIX}tx`, JSON.stringify(updated));
-      } catch {}
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+        } catch {}
+      }
       return updated;
     });
 
-    fetch(`/api/transactions?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }).catch(() => {});
+    fetch(
+      `/api/transactions?id=${encodeURIComponent(id)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`,
+      {
+        method: 'DELETE',
+        headers: uid ? { 'x-user-id': uid } : undefined,
+      }
+    ).catch(() => {});
   }, []);
 
   // Payables & Receivables
   const addPayableReceivable = useCallback((pr: Omit<PayableReceivable, 'id'>) => {
+    const uid = currentUserIdRef.current;
     const newPr = { ...pr, id: `pr-${Date.now()}` };
-    setPayablesReceivables((prev) => [...prev, newPr]);
+    setPayablesReceivables((prev) => {
+      const updated = [...prev, newPr];
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'pay'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
 
     fetch('/api/payables', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newPr),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(uid ? { 'x-user-id': uid } : {}),
+      },
+      body: JSON.stringify({ ...newPr, userId: uid }),
     }).catch(() => {});
   }, []);
 
   const settlePayableReceivable = useCallback(
     (id: string, accountId: string, paymentDate?: string) => {
+      const uid = currentUserIdRef.current;
       const finalDate = paymentDate || new Date().toISOString().split('T')[0];
       setPayablesReceivables((prev) => {
-        return prev.map((pr) => {
+        const updated = prev.map((pr) => {
           if (pr.id !== id) return pr;
 
           const finalAmt = pr.amount + (pr.accruedInterest || 0);
@@ -1049,38 +1213,66 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
           fetch('/api/payables', {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(uid ? { 'x-user-id': uid } : {}),
+            },
             body: JSON.stringify({
               id,
               status: 'PAID',
               paymentDate: finalDate,
               finalAmount: finalAmt,
               accountId,
+              userId: uid,
             }),
           }).catch(() => {});
 
           return {
             ...pr,
-            status: 'PAID',
+            status: 'PAID' as const,
             paymentDate: finalDate,
             accountId,
             finalAmount: finalAmt,
           };
         });
+        if (uid) {
+          try {
+            localStorage.setItem(getUserStorageKey(uid, 'pay'), JSON.stringify(updated));
+          } catch {}
+        }
+        return updated;
       });
     },
     [addTransaction]
   );
 
-  // Goals
+  // Goals (isoladas por usuário)
   const addGoal = useCallback((goal: Omit<Goal, 'id'>) => {
-    setGoals((prev) => [...prev, { ...goal, id: `goal-${Date.now()}` }]);
+    const uid = currentUserIdRef.current;
+    setGoals((prev) => {
+      const updated = [...prev, { ...goal, id: `goal-${Date.now()}` }];
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'goals'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
   }, []);
 
   const contributeToGoal = useCallback((id: string, amount: number) => {
-    setGoals((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g))
-    );
+    const uid = currentUserIdRef.current;
+    setGoals((prev) => {
+      const updated = prev.map((g) =>
+        g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g
+      );
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'goals'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
   }, []);
 
   // Compute stats and KPIs

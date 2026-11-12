@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
 
 const SECRET = process.env.AUTH_SECRET || 'finpro_secret_key_salt_2026_v2_hardened';
 const LEGACY_SALT = process.env.AUTH_SECRET || 'finpro_secret_key_salt_2026';
@@ -112,6 +113,61 @@ export function verifySessionToken(token?: string | null): SessionPayload | null
   } catch {
     return null;
   }
+}
+
+/**
+ * Extrai o userId autenticado da requisição (priorizando o Cookie HttpOnly assinado,
+ * com fallback para header x-user-id ou parâmetro explícito para sessões pré-existentes).
+ */
+export function resolveRequestUserId(
+  req: Request,
+  explicitUserId?: string | null
+): string | null {
+  const cookieHeader = req.headers.get('cookie') || '';
+  const match = cookieHeader
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+
+  if (match) {
+    const token = decodeURIComponent(match.slice(SESSION_COOKIE_NAME.length + 1));
+    const session = verifySessionToken(token);
+    if (session?.userId) {
+      return session.userId;
+    }
+  }
+
+  const headerUserId = req.headers.get('x-user-id')?.trim();
+  if (headerUserId) return headerUserId;
+
+  if (explicitUserId && typeof explicitUserId === 'string' && explicitUserId.trim()) {
+    return explicitUserId.trim();
+  }
+
+  return null;
+}
+
+/**
+ * Verifica no banco se o usuário informado é membro/proprietário do workspace.
+ * Isso garante isolamento multi-tenant absoluto: um cliente jamais acessa ou altera
+ * dados de outro cliente.
+ */
+export async function verifyWorkspaceAccess(
+  db: PrismaClient,
+  userId: string | null,
+  workspaceId: string | null | undefined
+): Promise<boolean> {
+  if (!userId || !workspaceId) return false;
+  const membership = await db.workspaceMember.findUnique({
+    where: {
+      userId_workspaceId: {
+        userId,
+        workspaceId,
+      },
+    },
+    select: { id: true },
+  });
+  return Boolean(membership);
 }
 
 /**

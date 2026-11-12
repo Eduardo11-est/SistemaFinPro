@@ -1,16 +1,29 @@
 import { NextResponse } from 'next/server';
 import { prisma, ensureNeonAwake } from '@/lib/prisma';
+import { resolveRequestUserId, verifyWorkspaceAccess } from '@/lib/auth';
 import { sanitizeText, sanitizePositiveAmount, getSafeErrorMessage } from '@/lib/security';
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     await ensureNeonAwake();
+    const userId = resolveRequestUserId(req, sanitizeText(searchParams.get('userId'), 100));
     const workspaceId = sanitizeText(searchParams.get('workspaceId'), 100);
-    const where = workspaceId ? { workspaceId } : {};
+
+    // Isolamento multi-cliente: sem userId, não retorna contas de outros usuários
+    if (!userId) {
+      return NextResponse.json([]);
+    }
 
     const accounts = await prisma.account.findMany({
-      where,
+      where: {
+        ...(workspaceId ? { workspaceId } : {}),
+        workspace: {
+          members: {
+            some: { userId },
+          },
+        },
+      },
       orderBy: { name: 'asc' },
     });
     return NextResponse.json(accounts);
@@ -27,6 +40,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     await ensureNeonAwake();
 
+    const userId = resolveRequestUserId(req, sanitizeText(body.userId, 100));
     const cleanName = sanitizeText(body.name, 100);
     const workspaceId = sanitizeText(body.workspaceId, 100);
 
@@ -35,6 +49,13 @@ export async function POST(req: Request) {
         { error: 'Nome da conta e workspaceId são obrigatórios' },
         { status: 400 }
       );
+    }
+
+    if (userId) {
+      const hasAccess = await verifyWorkspaceAccess(prisma, userId, workspaceId);
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Acesso negado a este workspace.' }, { status: 403 });
+      }
     }
 
     const initialBal = Number.isFinite(Number(body.initialBalance))
