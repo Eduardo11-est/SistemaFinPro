@@ -189,10 +189,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Active view in SPA layout
   const [activeView, setActiveView] = useState<string>('dashboard');
-  const [currentMonthPrefix, setCurrentMonthPrefix] = useState<string>(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [currentMonthPrefix, setCurrentMonthPrefix] = useState<string>('2026-11');
 
   // Data states
   const [accounts, setAccounts] = useState<Account[]>(INITIAL_ACCOUNTS);
@@ -431,6 +428,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           setSalariesByWorkspace(JSON.parse(savedSalaries));
         } catch {}
       }
+
+      const now = new Date();
+      setCurrentMonthPrefix(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
 
       if (userObj) {
         loadFromNeon(userObj.id);
