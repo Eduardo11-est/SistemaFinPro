@@ -1,89 +1,43 @@
-# PROMPT DE ESPECIFICAÇÃO: SISTEMA INTEGRADO DE CONTROLE FINANCEIRO (PESSOAL E CORPORATIVO)
+Plano de Melhorias - Etapa 1: Tela de Transações
 
-## 1. PAPEL E OBJETIVO
-Você atuará como um Arquiteto de Software e Desenvolvedor Full-Stack Senior. Sua missão é projetar e construir um sistema completo, moderno e intuitivo de Controle Financeiro Unificado (Pessoal e Corporativo), superando plataformas tradicionais de mercado (como Procfy.io, Organizze e Conta Azul).
+Este documento especifica as melhorias necessárias para a Tela de Transações do sistema de controle financeiro.
 
----
+1. Correção do Campo de Seleção de Categorias (Select / Dropdown)
 
-## 2. REQUISITOS DE ARQUITETURA E REGRA DE OURO
+Problema: Ao clicar para adicionar ou editar um novo registro de transação, a lista de opções do campo "Categoria" (list Categoria) exibe-se vazia, não carregando nenhuma informação cadastrada.
 
-### 🚨 REGRA DE OURO (SEPARAÇÃO DE CONTEXTOS)
-- O sistema deve permitir alternar instantaneamente entre os perfis **"Pessoal"** e **"Corporativo"** (com suporte a múltiplas empresas/CNPJs).
-- **Sem contaminação de dados:** Lançamentos, contas bancárias, relatórios e orçamentos pessoais NUNCA devem se misturar com os corporativos, a menos que seja uma transação explícita de transferência de pró-labore, distribuição de lucros ou aporte do sócio.
+Ação Esperada:
 
----
+Verificar a chamada à API ou estado local responsável por buscar as categorias cadastradas no sistema.
 
-## 3. FUNCIONALIDADES DETALHADAS POR MÓDULO
+Garantir que o componente de seleção (Select ou Dropdown) seja populado corretamente com as categorias ativas ao abrir o modal ou formulário de novo registro.
 
-### Módulo 1: Gestão Multiconta e Multiempresa
-- **Tipos de Conta:** Conta Corrente, Conta Poupança, Cartões de Crédito, Carteira Física, Contas de Investimento e Gateways de Pagamento (Stripe, Mercado Pago, Asaas, etc.).
-- **Multimoeda:** Suporte a transações em BRL, USD, EUR, etc., com conversão baseada na cotação da data da transação.
-- **Saldos:** Visão de saldo consolidado por contexto (Total Pessoal vs. Total Corporativo).
+Tratar o estado de carregamento (loading) e exibir uma mensagem amigável caso nenhuma categoria esteja cadastrada (com um atalho para criá-las, se aplicável).
 
-### Módulo 2: Gestão de Transações (Receitas e Despesas)
-- **Lançamentos:**
-  - Lançamentos avulsos, parcelados, recorrentes (fixos/variáveis) e transferências entre contas.
-  - Anexo de comprovantes e notas fiscais (PDF, PNG, JPG).
-  - Tags personalizadas e Categorias/Subcategorias ilimitadas.
-- **Centros de Custo e Projetos (Corporativo):**
-  - Alocação de receitas e despesas por projetos, clientes ou departamentos para apuração de margem de lucro individual.
+2. Otimização de Desempenho e Fluidez da Tela
 
-### Módulo 3: Contas a Pagar e a Receber
-- **Calendário Financeiro:** Visão em formato de calendário de vencimentos futuros.
-- **Gestão de Inadimplência:** Indicadores de contas em atraso com cálculo automático de juros/multa configuráveis.
-- **Cobranças:** Status de liquidação (Pendente, Pago, Atrasado, Cancelado, Agendado).
+Problema: A navegação e a interação na tela de transações estão lentas ou travando, carecendo de fluidez na experiência do usuário.
 
-### Módulo 4: Conciliação Bancária
-- Importação automática/semiautomática de extratos nos formatos **OFX, CSV e PDF**.
-- Sistema inteligente de conciliação com sugestão automática de correspondência entre o extrato importado e os lançamentos cadastrados.
-- Criação rápida de regras de conciliação para lançamentos recorrentes.
+Ação Esperada:
 
-### Módulo 5: Planejamento, Orçamento e Metas
-- **Orçamento por Categoria (Budgeting):** Definição de teto de gastos mensal/anual com alertas em tempo real ao atingir 80% e 100% do limite.
-- **Metas Pessoais:** Acompanhamento de metas financeiras (ex: Reserva de Emergência, Viagem, Compra de Ativo) com barra de progresso.
-- **Projeção de Fluxo de Caixa (Corporativo):** Projeção para 30, 60, 90 dias e 12 meses com base nos compromissos agendados e histórico.
+Avaliar e otimizar renderizações desnecessárias em componentes React/front-end (ex: uso de useMemo, useCallback, ou refatoração de estado global/local).
 
-### Módulo 6: Relatórios Financeiros Avançados
-- **DRE (Demonstrativo do Resultado do Exercício) Gerencial:**
-  - Competência vs. Caixa.
-  - Lucro Bruto, EBITDA/EBIT, Lucro Líquido e Margem de Lucro.
-- **Fluxo de Caixa Operacional, de Investimento e de Financiamento.**
-- **Análise de Pareto (80/20):** Identificação dos maiores ofensores de custo e maiores fontes de receita.
-- **Exportação:** Exportação dos dados e relatórios em PDF, Excel (XLSX) e CSV.
+Implementar paginação ou rolagem infinita (infinite scroll) / virtualização de lista caso a tabela/listagem de transações contenha um grande volume de dados.
 
-### Módulo 7: Automações e Alertas
-- Notificações de contas a vencer (via e-mail, WhatsApp ou push notification no sistema).
-- Alertas de rombo no caixa (saldo projetado negativo nos próximos dias).
+Otimizar as requisições de rede para evitar múltiplos fetches redundantes ao carregar ou filtrar transações.
 
----
+3. Indicador de Gastos do Mês com Base no Salário
 
-## 4. MODELO DE DADOS BÁSICO (ENTIDADES PRINCIPAIS)
-Por favor, modele o banco de dados considerando as seguintes entidades e seus relacionamentos:
-1. `Users` (Usuários e permissões)
-2. `Workspaces / Contexts` (Pessoal vs. Empresas/CNPJs)
-3. `Accounts` (Contas bancárias e carteiras)
-4. `Categories & Subcategories` (Categorias parametrizáveis)
-5. `Cost_Centers` (Centros de Custo/Projetos)
-6. `Transactions` (Entradas, Saídas, Transferências)
-7. `Payables_Receivables` (Títulos a pagar e receber)
-8. `Budgets & Goals` (Orçamentos e Metas)
-9. `Attachments` (Documentos anexos)
+Problema: O usuário precisa visualizar de forma clara o panorama dos gastos mensais em relação à sua renda (salário).
 
----
+Ação Esperada:
 
-## 5. EXPERIÊNCIA DO USUÁRIO (UX/UI) E TECNOLOGIA
-- **Dashboard Principal:**
-  - Visão limpa com KPIs essenciais no topo (Saldo Atual, Entradas do Mês, Saídas do Mês, Resultado do Mês e Projeção).
-  - Gráficos intuitivos de barras/linhas para Fluxo de Caixa e gráfico de rosca para distribuição de despesas.
-  - Botão de "Ação Rápida" (`+ Nova Transação`) visível e acessível via atalhos de teclado.
-- **Modo Dark / Light Mode.**
-- **Segurança:** Autenticação de dois fatores (2FA), criptografia de dados sensíveis e logs de auditoria para alterações financeiras.
+Configuração de Salário: Adicionar um campo ou configuração onde o usuário possa definir o valor do seu salário/renda mensal (com opção de edição em configurações ou diretamente no painel da tela).
 
----
+Indicador Visual na Tela de Transações:
 
-## 6. ENTREGÁVEIS SOLICITADOS
-Por favor, estruture a solução nas seguintes etapas:
-1. **Modelagem de Banco de Dados:** Diagrama ER ou schema SQL/Prisma completo com todos os relacionamentos.
-2. **Definição da Stack Tecnológica:** Sugestão da melhor stack (ex: Next.js/React, Tailwind CSS, Node.js/Python, PostgreSQL/Prisma).
-3. **Protótipo dos Endpoints API ou Server Actions:** Estrutura das rotas CRUD financeiras.
-4. **Código Funcional do Módulo Core:** Implementação da estrutura de alternância de contexto (Pessoal/Corporativo) e criação do Dashboard com os indicadores financeiros.
+Calcular o somatório das despesas do mês corrente.
+
+Expor um card ou barra de progresso mostrando o total gasto no mês versus o salário definido.
+
+Exibir o saldo restante ou porcentagem utilizada para melhor controle financeiro visual.
