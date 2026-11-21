@@ -12,6 +12,7 @@ import {
   Settings,
   ShieldCheck,
   Wrench,
+  TrendingUp,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -59,6 +60,12 @@ export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }
         label: isPersonal ? 'Orçamento & Metas' : 'Orçamento & Centros',
         icon: PieChart,
         badge: null,
+      },
+      {
+        id: 'investments',
+        label: 'Investimentos',
+        icon: TrendingUp,
+        badge: 'Novo',
       },
       {
         id: 'reports',

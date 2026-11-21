@@ -4,6 +4,7 @@ export type ManageableViewId =
   | 'accounts'
   | 'payables'
   | 'budgets'
+  | 'investments'
   | 'reports'
   | 'settings';
 
@@ -40,6 +41,11 @@ export const MANAGEABLE_VIEWS: ManageableViewMeta[] = [
     description: 'Regra 50/30/20, limites por categoria e metas',
   },
   {
+    id: 'investments',
+    label: 'Investimentos',
+    description: 'Carteira de ativos, alocação, rentabilidade e renda passiva',
+  },
+  {
     id: 'reports',
     label: 'Relatórios & Fluxo / DRE',
     description: 'Análises consolidadas e demonstrativos financeiros',
@@ -59,11 +65,18 @@ export interface MaintenanceConfig {
   disabledViews: ManageableViewId[];
   message: string;
   updatedAt?: string;
+  initializedDefaults?: string[];
 }
 
+export const DEFAULT_LOCKED_NEW_VIEWS: ManageableViewId[] = ['investments'];
+
+export const DEFAULT_NEW_VIEW_MAINTENANCE_MESSAGE =
+  'Nova tela em desenvolvimento — a tela Investimentos estará disponível em breve.';
+
 export const DEFAULT_MAINTENANCE_CONFIG: MaintenanceConfig = {
-  disabledViews: [],
-  message: '',
+  disabledViews: [...DEFAULT_LOCKED_NEW_VIEWS],
+  message: DEFAULT_NEW_VIEW_MAINTENANCE_MESSAGE,
+  initializedDefaults: [...DEFAULT_LOCKED_NEW_VIEWS],
 };
 
 export const MAINTENANCE_AUDIT_ACTION = '__MAINTENANCE_CONFIG__';
@@ -93,8 +106,35 @@ export function sanitizeMaintenanceConfig(raw: unknown): MaintenanceConfig {
     typeof obj.message === 'string' ? obj.message.trim().slice(0, 500) : '';
   const updatedAt =
     typeof obj.updatedAt === 'string' ? obj.updatedAt : undefined;
+  const initializedDefaults = Array.isArray(obj.initializedDefaults)
+    ? obj.initializedDefaults.filter((v): v is string => typeof v === 'string')
+    : undefined;
 
-  return { disabledViews, message, updatedAt };
+  return { disabledViews, message, updatedAt, initializedDefaults };
+}
+
+/**
+ * Aplica bloqueios padrão para novas telas em desenvolvimento caso o ADM ainda não tenha
+ * configurado explicitamente aquela tela no banco.
+ */
+export function applyDefaultNewViewLocks(config: MaintenanceConfig): MaintenanceConfig {
+  const initialized = new Set(config.initializedDefaults || []);
+  const pendingDefaults = DEFAULT_LOCKED_NEW_VIEWS.filter((v) => !initialized.has(v));
+  if (pendingDefaults.length === 0) {
+    return config;
+  }
+
+  const mergedDisabled = Array.from(
+    new Set([...config.disabledViews, ...pendingDefaults])
+  );
+  const mergedMessage = config.message || DEFAULT_NEW_VIEW_MAINTENANCE_MESSAGE;
+
+  return {
+    ...config,
+    disabledViews: mergedDisabled,
+    message: mergedMessage,
+    initializedDefaults: Array.from(new Set([...initialized, ...pendingDefaults])),
+  };
 }
 
 export function formatDefaultMaintenanceMessage(disabledViews: ManageableViewId[]): string {

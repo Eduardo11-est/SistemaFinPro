@@ -4,6 +4,7 @@ import {
   DEFAULT_MAINTENANCE_CONFIG,
   MAINTENANCE_AUDIT_ACTION,
   MAINTENANCE_AUDIT_ENTITY,
+  applyDefaultNewViewLocks,
   sanitizeMaintenanceConfig,
 } from '@/lib/maintenance';
 
@@ -24,7 +25,7 @@ export async function GET() {
 
     try {
       const parsed = JSON.parse(record.details);
-      return NextResponse.json(sanitizeMaintenanceConfig(parsed));
+      return NextResponse.json(applyDefaultNewViewLocks(sanitizeMaintenanceConfig(parsed)));
     } catch {
       return NextResponse.json(DEFAULT_MAINTENANCE_CONFIG);
     }

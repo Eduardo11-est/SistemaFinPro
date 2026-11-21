@@ -62,6 +62,9 @@ const PayablesReceivablesView = dynamic(
 const BudgetsAndGoalsView = dynamic(
   () => import('@/components/budgets/BudgetsAndGoalsView').then((m) => m.BudgetsAndGoalsView)
 );
+const InvestmentsView = dynamic(
+  () => import('@/components/investments/InvestmentsView').then((m) => m.InvestmentsView)
+);
 const ReportsView = dynamic(
   () => import('@/components/reports/ReportsView').then((m) => m.ReportsView)
 );
@@ -284,6 +287,7 @@ export default function HomePage() {
               {activeView === 'accounts' && <AccountsView />}
               {activeView === 'payables' && <PayablesReceivablesView />}
               {activeView === 'budgets' && <BudgetsAndGoalsView />}
+              {activeView === 'investments' && <InvestmentsView />}
               {activeView === 'reports' && <ReportsView />}
               {activeView === 'settings' && <SettingsAndNeonView />}
               {activeView === 'admin' && currentUser?.isAdmin && <AdminNeonView />}

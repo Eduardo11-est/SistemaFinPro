@@ -3,6 +3,7 @@ import { prisma, ensureNeonAwake } from '@/lib/prisma';
 import { verifyAdminRequest } from '@/lib/auth';
 import { sanitizeText, getSafeErrorMessage } from '@/lib/security';
 import {
+  DEFAULT_LOCKED_NEW_VIEWS,
   MAINTENANCE_AUDIT_ACTION,
   MAINTENANCE_AUDIT_ENTITY,
   sanitizeMaintenanceConfig,
@@ -24,6 +25,7 @@ export async function PATCH(req: Request) {
       disabledViews: body.disabledViews,
       message: sanitizeText(body.message, 500),
       updatedAt: new Date().toISOString(),
+      initializedDefaults: [...DEFAULT_LOCKED_NEW_VIEWS],
     });
 
     const serialized = JSON.stringify(sanitized);
