@@ -115,14 +115,16 @@ const TransactionRow = React.memo(function TransactionRow({
                   </span>
                 </span>
               )}
-              {tx.tags?.map((t, idx) => (
-                <span
-                  key={idx}
-                  className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-400"
-                >
-                  #{t}
-                </span>
-              ))}
+              {tx.tags
+                ?.filter((t) => !t.startsWith('__'))
+                .map((t, idx) => (
+                  <span
+                    key={idx}
+                    className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-400"
+                  >
+                    #{t}
+                  </span>
+                ))}
             </div>
           </div>
         </div>
@@ -189,7 +191,7 @@ const TransactionRow = React.memo(function TransactionRow({
             className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
             title={
               tx.isRecurringProjection
-                ? 'Editar Regra Recorrente Original'
+                ? 'Editar este mês ou série recorrente'
                 : 'Editar Transação'
             }
           >
@@ -434,16 +436,9 @@ export function TransactionListView() {
 
   const handleEditTx = useCallback(
     (tx: Transaction) => {
-      if (tx.isRecurringProjection && tx.recurringSourceId) {
-        const sourceTx = transactions.find((t) => t.id === tx.recurringSourceId);
-        if (sourceTx) {
-          setEditingTransaction(sourceTx);
-          return;
-        }
-      }
       setEditingTransaction(tx);
     },
-    [setEditingTransaction, transactions]
+    [setEditingTransaction]
   );
 
   const handleDeleteTx = useCallback(

@@ -18,6 +18,7 @@ import {
   Pencil,
   CreditCard,
   Calendar,
+  Repeat,
 } from 'lucide-react';
 import { TransactionType, CurrencyType, RecurrenceFrequency } from '@/types/finance';
 import {
@@ -26,6 +27,7 @@ import {
   projectInstallments,
   resolveTransactionPillar,
 } from '@/lib/credit-card';
+import { getNextRecurrenceDate } from '@/lib/recurrence';
 
 function getDefaultDateForMonth(monthPrefix: string): string {
   const now = new Date();
@@ -61,6 +63,7 @@ export function TransactionModal() {
     costCenters,
     currentWorkspace,
     workspaces,
+    transactions,
     addTransaction,
     addTransactionsBatch,
     updateTransaction,
@@ -71,6 +74,10 @@ export function TransactionModal() {
 
   const isPersonal = currentWorkspace.type === 'PERSONAL';
   const isEditing = Boolean(editingTransaction);
+  const isEditingRecurring = Boolean(
+    editingTransaction &&
+      (editingTransaction.isRecurringProjection || editingTransaction.isRecurring)
+  );
 
   const [type, setType] = useState<TransactionType>('EXPENSE');
   const [description, setDescription] = useState('');
@@ -114,6 +121,7 @@ export function TransactionModal() {
   // Recorrência
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('MONTHLY');
+  const [recurrenceEditScope, setRecurrenceEditScope] = useState<'SINGLE' | 'ALL'>('SINGLE');
 
   // Inter-context (Pró-Labore / Distribuição PJ -> PF)
   const [isInterContext, setIsInterContext] = useState(false);
@@ -162,7 +170,11 @@ export function TransactionModal() {
       setCostCenterId(editingTransaction.costCenterId || '');
       setCurrency(editingTransaction.currency || 'BRL');
       setExchangeRate(editingTransaction.exchangeRate || 1);
-      setTagsStr((editingTransaction.tags || []).join(', '));
+      setTagsStr(
+        (editingTransaction.tags || [])
+          .filter((t) => !t.startsWith('__'))
+          .join(', ')
+      );
       setNotes(editingTransaction.notes || '');
       setIsInstallment(Boolean(editingTransaction.isInstallment));
       setTotalInstallments(editingTransaction.totalInstallments || 2);
@@ -173,6 +185,7 @@ export function TransactionModal() {
           ? editingTransaction.recurrenceFrequency
           : 'MONTHLY'
       );
+      setRecurrenceEditScope('SINGLE');
       setIsInterContext(Boolean(editingTransaction.tags?.includes('pro-labore')));
     } else {
       setType('EXPENSE');
@@ -284,26 +297,153 @@ export function TransactionModal() {
     const baseCleanDesc = description.trim().replace(/\s*\(\d+\/\d+\)$/, '');
 
     if (isEditing && editingTransaction) {
-      updateTransaction(editingTransaction.id, {
-        type,
-        description: description.trim(),
-        amount,
-        date,
-        currency,
-        exchangeRate,
-        notes: notes.trim() || undefined,
-        isInstallment,
-        totalInstallments: isInstallment ? totalInstallments : undefined,
-        isRecurring,
-        recurrenceFrequency: isRecurring ? recurrenceFrequency : 'NONE',
-        tags,
-        accountId,
-        targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
-        categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
-        costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
-      });
-      if (/^\d{4}-\d{2}/.test(date)) {
-        setCurrentMonthPrefix(date.slice(0, 7));
+      const existingInternalTags = (editingTransaction.tags || []).filter((t) =>
+        t.startsWith('__')
+      );
+
+      if (editingTransaction.isRecurringProjection && editingTransaction.recurringSourceId) {
+        const sourceTx = transactions.find((t) => t.id === editingTransaction.recurringSourceId);
+
+        if (recurrenceEditScope === 'SINGLE' || !sourceTx) {
+          // Materializa apenas esta ocorrência/mês sem alterar os demais meses da série recorrente
+          const overrideTags = [...tags];
+          const origProjectedDate = editingTransaction.date.split('T')[0];
+          if (date !== origProjectedDate) {
+            overrideTags.push(`__rec:${origProjectedDate}`);
+          }
+
+          addTransaction({
+            type,
+            description: description.trim(),
+            amount,
+            date,
+            status: 'COMPLETED',
+            paymentMethod:
+              editingTransaction.paymentMethod ||
+              (type === 'EXPENSE' ? 'Transferência / PIX' : 'PIX'),
+            currency,
+            exchangeRate,
+            notes: notes.trim() || undefined,
+            isRecurring: false,
+            recurrenceFrequency: 'NONE',
+            linkedTransactionId: editingTransaction.recurringSourceId,
+            tags: overrideTags,
+            workspaceId: currentWorkspace.id,
+            accountId,
+            targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
+            categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
+            costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
+          });
+          if (/^\d{4}-\d{2}/.test(date)) {
+            setCurrentMonthPrefix(date.slice(0, 7));
+          }
+        } else {
+          // Atualiza a série recorrente inteira preservando o mês original da regra
+          const sourceDateParts = sourceTx.date.split('T')[0].split('-');
+          const editedDay = parseInt(date.split('-')[2] || '', 10);
+          const origProjectedDay = parseInt(editingTransaction.date.split('T')[0].split('-')[2] || '', 10);
+          let nextSourceDate = sourceTx.date.split('T')[0];
+          if (sourceDateParts.length === 3 && editedDay && editedDay !== origProjectedDay) {
+            const sy = parseInt(sourceDateParts[0], 10);
+            const sm = parseInt(sourceDateParts[1], 10);
+            const maxDay = new Date(sy, sm, 0).getDate();
+            nextSourceDate = `${sy}-${String(sm).padStart(2, '0')}-${String(Math.min(editedDay, maxDay)).padStart(2, '0')}`;
+          }
+
+          updateTransaction(sourceTx.id, {
+            type,
+            description: description.trim(),
+            amount,
+            date: nextSourceDate,
+            currency,
+            exchangeRate,
+            notes: notes.trim() || undefined,
+            isRecurring,
+            recurrenceFrequency: isRecurring ? recurrenceFrequency : 'NONE',
+            tags,
+            accountId,
+            targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
+            categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
+            costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
+          });
+        }
+      } else if (editingTransaction.isRecurring && recurrenceEditScope === 'SINGLE') {
+        // Editando apenas o mês inicial de uma série recorrente:
+        // avança a regra original para a próxima ocorrência livre e grava este mês com os novos valores
+        const nextDate = getNextRecurrenceDate(
+          editingTransaction.date,
+          editingTransaction.recurrenceFrequency,
+          transactions,
+          editingTransaction.id
+        );
+
+        if (nextDate) {
+          updateTransaction(editingTransaction.id, { date: nextDate });
+          addTransaction({
+            type,
+            description: description.trim(),
+            amount,
+            date,
+            status: 'COMPLETED',
+            paymentMethod:
+              editingTransaction.paymentMethod ||
+              (type === 'EXPENSE' ? 'Transferência / PIX' : 'PIX'),
+            currency,
+            exchangeRate,
+            notes: notes.trim() || undefined,
+            isRecurring: false,
+            recurrenceFrequency: 'NONE',
+            linkedTransactionId: editingTransaction.id,
+            tags,
+            workspaceId: currentWorkspace.id,
+            accountId,
+            targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
+            categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
+            costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
+          });
+        } else {
+          updateTransaction(editingTransaction.id, {
+            type,
+            description: description.trim(),
+            amount,
+            date,
+            currency,
+            exchangeRate,
+            notes: notes.trim() || undefined,
+            isRecurring: false,
+            recurrenceFrequency: 'NONE',
+            tags: [...tags, ...existingInternalTags],
+            accountId,
+            targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
+            categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
+            costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
+          });
+        }
+        if (/^\d{4}-\d{2}/.test(date)) {
+          setCurrentMonthPrefix(date.slice(0, 7));
+        }
+      } else {
+        updateTransaction(editingTransaction.id, {
+          type,
+          description: description.trim(),
+          amount,
+          date,
+          currency,
+          exchangeRate,
+          notes: notes.trim() || undefined,
+          isInstallment,
+          totalInstallments: isInstallment ? totalInstallments : undefined,
+          isRecurring,
+          recurrenceFrequency: isRecurring ? recurrenceFrequency : 'NONE',
+          tags: [...tags, ...existingInternalTags],
+          accountId,
+          targetAccountId: type === 'TRANSFER' ? targetAccountId || undefined : undefined,
+          categoryId: type !== 'TRANSFER' ? categoryId || undefined : undefined,
+          costCenterId: !isPersonal && type !== 'TRANSFER' ? costCenterId || undefined : undefined,
+        });
+        if (/^\d{4}-\d{2}/.test(date)) {
+          setCurrentMonthPrefix(date.slice(0, 7));
+        }
       }
     } else if (isInstallment && totalInstallments > 1) {
       const groupId = `grp-${Date.now()}`;
@@ -425,6 +565,46 @@ export function TransactionModal() {
 
         {/* Formulário com Scroll */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
+          {/* Escopo da Edição para Transações Recorrentes */}
+          {isEditingRecurring && editingTransaction && (
+            <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/25 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-300">
+                <Repeat className="w-3.5 h-3.5 text-sky-500" />
+                <span>Onde aplicar esta alteração?</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRecurrenceEditScope('SINGLE')}
+                  className={`px-3 py-2 rounded-xl border text-left transition-all ${
+                    recurrenceEditScope === 'SINGLE'
+                      ? 'border-sky-500 bg-sky-500/15 text-sky-800 dark:text-sky-200 shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                  }`}
+                >
+                  <span className="block text-xs font-bold">Apenas este mês</span>
+                  <span className="block text-[10px] opacity-80">
+                    Altera só {editingTransaction.date.split('T')[0].split('-').reverse().join('/')}, sem alterar outros meses
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecurrenceEditScope('ALL')}
+                  className={`px-3 py-2 rounded-xl border text-left transition-all ${
+                    recurrenceEditScope === 'ALL'
+                      ? 'border-sky-500 bg-sky-500/15 text-sky-800 dark:text-sky-200 shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                  }`}
+                >
+                  <span className="block text-xs font-bold">Todos os meses</span>
+                  <span className="block text-[10px] opacity-80">
+                    Atualiza o valor/dados de toda a série recorrente
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Seletor de Tipo: Despesa, Receita, Transferência */}
           <div className="grid grid-cols-3 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80">
             <button
@@ -750,6 +930,7 @@ export function TransactionModal() {
           )}
 
           {/* Parcelamento e Recorrência */}
+          {(!isEditing || !isEditingRecurring || recurrenceEditScope === 'ALL') && (
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3 text-xs">
             <div className="flex flex-wrap items-center gap-4">
               {!isEditing && (
@@ -780,30 +961,34 @@ export function TransactionModal() {
                 </>
               )}
 
-              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 font-medium">
-                <input
-                  type="checkbox"
-                  checked={isRecurring}
-                  onChange={(e) => setIsRecurring(e.target.checked)}
-                  className="rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>Recorrente?</span>
-              </label>
+              {(!isEditingRecurring || recurrenceEditScope === 'ALL') && (
+                <>
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={isRecurring}
+                      onChange={(e) => setIsRecurring(e.target.checked)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>Recorrente?</span>
+                  </label>
 
-              {isRecurring && (
-                <select
-                  value={recurrenceFrequency}
-                  onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
-                  className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                >
-                  <option value="MONTHLY">Mensal</option>
-                  <option value="WEEKLY">Semanal</option>
-                  <option value="YEARLY">Anual</option>
-                </select>
+                  {isRecurring && (
+                    <select
+                      value={recurrenceFrequency}
+                      onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
+                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      <option value="MONTHLY">Mensal</option>
+                      <option value="WEEKLY">Semanal</option>
+                      <option value="YEARLY">Anual</option>
+                    </select>
+                  )}
+                </>
               )}
             </div>
 
-            {isRecurring && (
+            {isRecurring && (!isEditingRecurring || recurrenceEditScope === 'ALL') && (
               <p className="text-[11px] text-sky-600 dark:text-sky-400">
                 Este lançamento será projetado automaticamente nos meses futuros conforme a
                 frequência selecionada.
@@ -849,6 +1034,7 @@ export function TransactionModal() {
                 </div>
               )}
           </div>
+          )}
 
           {/* Tags & Anexo de Comprovante */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">

@@ -62,6 +62,18 @@ export function projectRecurringTransactionsForMonth(
     const clean = t.date.split('T')[0];
     materializedKeys.add(`${t.linkedTransactionId}::${clean}`);
     materializedKeys.add(`${t.linkedTransactionId}::${clean.slice(0, 7)}`);
+    if (Array.isArray(t.tags)) {
+      for (let k = 0; k < t.tags.length; k++) {
+        const tag = t.tags[k];
+        if (tag.startsWith('__rec:')) {
+          const origOccDate = tag.slice('__rec:'.length);
+          if (origOccDate) {
+            materializedKeys.add(`${t.linkedTransactionId}::${origOccDate}`);
+            materializedKeys.add(`${t.linkedTransactionId}::${origOccDate.slice(0, 7)}`);
+          }
+        }
+      }
+    }
   }
 
   const projected: Transaction[] = [];
@@ -162,3 +174,85 @@ export function getTransactionsForMonth(
 
   return [...realForMonth, ...projectedForMonth].sort((a, b) => b.date.localeCompare(a.date));
 }
+
+function advanceDateByFrequency(
+  baseParts: { year: number; month: number; day: number },
+  frequency: RecurrenceFrequency,
+  step: number
+): string | null {
+  if (frequency === 'MONTHLY') {
+    const totalMonths = baseParts.year * 12 + (baseParts.month - 1) + step;
+    const targetYear = Math.floor(totalMonths / 12);
+    const targetMonth = (totalMonths % 12) + 1;
+    const maxDay = new Date(targetYear, targetMonth, 0).getDate();
+    return formatDateParts(targetYear, targetMonth, Math.min(baseParts.day, maxDay));
+  }
+  if (frequency === 'YEARLY') {
+    const targetYear = baseParts.year + step;
+    const maxDay = new Date(targetYear, baseParts.month, 0).getDate();
+    return formatDateParts(targetYear, baseParts.month, Math.min(baseParts.day, maxDay));
+  }
+  if (frequency === 'WEEKLY') {
+    const ms = Date.UTC(baseParts.year, baseParts.month - 1, baseParts.day) + step * 7 * DAY_MS;
+    const d = new Date(ms);
+    return formatDateParts(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  }
+  if (frequency === 'DAILY') {
+    const ms = Date.UTC(baseParts.year, baseParts.month - 1, baseParts.day) + step * DAY_MS;
+    const d = new Date(ms);
+    return formatDateParts(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  }
+  return null;
+}
+
+/**
+ * Calcula a próxima data livre de ocorrência para uma série recorrente,
+ * pulando eventuais datas/meses que já tenham um lançamento customizado vinculado.
+ */
+export function getNextRecurrenceDate(
+  dateStr: string,
+  frequency?: RecurrenceFrequency,
+  transactions: Transaction[] = [],
+  sourceId?: string
+): string | null {
+  if (!frequency || frequency === 'NONE') return null;
+  const baseParts = parseDateParts(dateStr);
+  if (!baseParts) return null;
+
+  const overriddenKeys = new Set<string>();
+  if (sourceId) {
+    for (let i = 0; i < transactions.length; i++) {
+      const t = transactions[i];
+      if (t.isRecurringProjection || t.linkedTransactionId !== sourceId || !t.date) continue;
+      const clean = t.date.split('T')[0];
+      overriddenKeys.add(clean);
+      overriddenKeys.add(clean.slice(0, 7));
+      if (Array.isArray(t.tags)) {
+        for (let k = 0; k < t.tags.length; k++) {
+          if (t.tags[k].startsWith('__rec:')) {
+            const origDate = t.tags[k].slice('__rec:'.length);
+            if (origDate) {
+              overriddenKeys.add(origDate);
+              overriddenKeys.add(origDate.slice(0, 7));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (let step = 1; step <= 120; step++) {
+    const candidate = advanceDateByFrequency(baseParts, frequency, step);
+    if (!candidate) return null;
+    const isAlreadyOverridden =
+      overriddenKeys.has(candidate) ||
+      ((frequency === 'MONTHLY' || frequency === 'YEARLY') &&
+        overriddenKeys.has(candidate.slice(0, 7)));
+    if (!isAlreadyOverridden) {
+      return candidate;
+    }
+  }
+
+  return advanceDateByFrequency(baseParts, frequency, 1);
+}
+
