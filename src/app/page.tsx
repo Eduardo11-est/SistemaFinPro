@@ -58,6 +58,9 @@ const ReportsView = dynamic(
 const SettingsAndNeonView = dynamic(
   () => import('@/components/settings/SettingsAndNeonView').then((m) => m.SettingsAndNeonView)
 );
+const AdminNeonView = dynamic(
+  () => import('@/components/admin/AdminNeonView').then((m) => m.AdminNeonView)
+);
 const TransactionModal = dynamic(
   () => import('@/components/transactions/TransactionModal').then((m) => m.TransactionModal)
 );
@@ -148,6 +151,7 @@ export default function HomePage() {
           {activeView === 'budgets' && <BudgetsAndGoalsView />}
           {activeView === 'reports' && <ReportsView />}
           {activeView === 'settings' && <SettingsAndNeonView />}
+          {activeView === 'admin' && currentUser?.isAdmin && <AdminNeonView />}
         </main>
       </div>
 

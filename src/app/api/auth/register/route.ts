@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withDatabaseRetry } from '@/lib/prisma';
-import { hashPassword, attachSessionCookie } from '@/lib/auth';
+import { hashPassword, attachSessionCookie, isAdminEmail } from '@/lib/auth';
 import {
   checkRateLimit,
   getClientIdentifier,
@@ -143,6 +143,7 @@ export async function POST(req: Request) {
           id: user.id,
           name: user.name,
           email: user.email,
+          isAdmin: isAdminEmail(user.email),
         },
         workspace,
       });

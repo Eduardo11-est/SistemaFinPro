@@ -244,7 +244,7 @@ export function AuthScreen() {
           {/* Destaque de Segurança */}
           <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800/60 flex items-center justify-center gap-2 text-[11px] text-slate-500">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Banco de dados Neon PostgreSQL • Criptografia ativa</span>
+            <span>Ambiente seguro em nuvem • Criptografia ativa</span>
           </div>
         </div>
       </div>

@@ -13,6 +13,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: ADMIN_EMAILS
+        sync: false
       - key: NEXT_PUBLIC_APP_NAME
         value: "FinPro - Controle Financeiro Unificado"
       - key: NEXT_PUBLIC_DEFAULT_CURRENCY

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withDatabaseRetry } from '@/lib/prisma';
-import { verifyPassword, hashPassword, attachSessionCookie } from '@/lib/auth';
+import { verifyPassword, hashPassword, attachSessionCookie, isAdminEmail } from '@/lib/auth';
 import { checkRateLimit, getClientIdentifier, getSafeErrorMessage } from '@/lib/security';
 
 export async function POST(req: Request) {
@@ -127,6 +127,7 @@ export async function POST(req: Request) {
           name: user.name,
           email: user.email,
           avatarUrl: user.avatarUrl,
+          isAdmin: isAdminEmail(user.email),
         },
         workspaces,
       });

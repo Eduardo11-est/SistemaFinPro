@@ -168,7 +168,7 @@ export function Navbar() {
                   className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Cadastrar Novo CNPJ / Empresa</span>
+                  <span>Gerenciar Perfis (PF / Empresa)</span>
                 </button>
               </div>
             </div>

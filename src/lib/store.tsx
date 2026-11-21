@@ -54,6 +54,10 @@ interface FinanceContextType {
   currentWorkspace: Workspace;
   setCurrentWorkspaceId: (id: string) => void;
   addWorkspace: (ws: Omit<Workspace, 'id' | 'createdAt'>) => void;
+  updateWorkspace: (
+    id: string,
+    updates: Partial<Pick<Workspace, 'name' | 'document' | 'legalName'>>
+  ) => void;
 
   // Currencies & Exchange
   activeCurrency: CurrencyType;
@@ -356,7 +360,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         const userParam = `?userId=${encodeURIComponent(userId)}`;
         const headers = { 'x-user-id': userId };
 
-        const [wsRes, accRes, catRes, txRes, payRes, goalsRes, budgetsRes] = await Promise.all([
+        const [meRes, wsRes, accRes, catRes, txRes, payRes, goalsRes, budgetsRes] = await Promise.all([
+          fetch(`/api/auth/me${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/workspaces${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/accounts${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/categories${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
@@ -365,6 +370,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           fetch(`/api/goals${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
           fetch(`/api/budgets${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         ]);
+
+        if (meRes?.user?.id) {
+          setCurrentUser(meRes.user);
+          try {
+            localStorage.setItem(`${STORAGE_KEY_PREFIX}active_user`, JSON.stringify(meRes.user));
+          } catch {}
+        }
 
         let activeWsId = currentWorkspaceIdRef.current;
 
@@ -1164,6 +1176,31 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(() => {});
   }, []);
+
+  const updateWorkspace = useCallback(
+    (id: string, updates: Partial<Pick<Workspace, 'name' | 'document' | 'legalName'>>) => {
+      const uid = currentUserIdRef.current;
+      setWorkspaces((prev) =>
+        prev.map((w) => (w.id === id ? { ...w, ...updates } : w))
+      );
+
+      if (!id.startsWith('ws-')) {
+        fetch('/api/workspaces', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(uid ? { 'x-user-id': uid } : {}),
+          },
+          body: JSON.stringify({
+            workspaceId: id,
+            ...updates,
+            userId: uid,
+          }),
+        }).catch(() => {});
+      }
+    },
+    []
+  );
 
   // Transaction Actions with Inter-Context Awareness (Golden Rule!)
   const addTransaction = useCallback(
@@ -1976,6 +2013,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       currentWorkspace,
       setCurrentWorkspaceId: handleSetWorkspace,
       addWorkspace,
+      updateWorkspace,
 
       activeCurrency,
       setActiveCurrency,
@@ -2047,6 +2085,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       currentWorkspace,
       handleSetWorkspace,
       addWorkspace,
+      updateWorkspace,
       activeCurrency,
       exchangeRates,
       convertAmount,

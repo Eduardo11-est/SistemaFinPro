@@ -1,28 +1,41 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useFinance } from '@/lib/store';
 import {
-  Database,
   CheckCircle2,
-  AlertCircle,
-  RefreshCw,
-  ExternalLink,
-  Building,
+  Building2,
+  User,
   Plus,
-  Shield,
-  Sparkles,
   Wallet,
   Tag,
   Trash2,
+  Settings,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
-import { NeonStatus } from '@/lib/neon';
+import { Workspace, WorkspaceType } from '@/types/finance';
+
+function parseBRLNumber(raw: string): number {
+  const trimmed = raw.trim().replace(/\s+/g, '');
+  if (!trimmed) return 0;
+  if (trimmed.includes(',')) {
+    return parseFloat(trimmed.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(trimmed)) {
+    return parseFloat(trimmed.replace(/\./g, '')) || 0;
+  }
+  return parseFloat(trimmed) || 0;
+}
 
 export function SettingsAndNeonView() {
   const {
     workspaces,
     addWorkspace,
+    updateWorkspace,
     currentWorkspace,
+    setCurrentWorkspaceId,
     monthlySalary,
     setMonthlySalary,
     formatMoney,
@@ -31,53 +44,42 @@ export function SettingsAndNeonView() {
     deleteCategory,
   } = useFinance();
 
-  const [neonStatus, setNeonStatus] = useState<NeonStatus | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
   // Salário / Renda Mensal form
   const [salaryStr, setSalaryStr] = useState('');
   const [salarySavedFeedback, setSalarySavedFeedback] = useState(false);
 
-  // Nova Categoria form
+  // Nova Categoria form & filtro
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
   const [newCatColor, setNewCatColor] = useState('#10b981');
+  const [catFilter, setCatFilter] = useState<'ALL' | 'EXPENSE' | 'INCOME'>('ALL');
 
-  // New company form
-  const [companyName, setCompanyName] = useState('');
+  // Novo Cadastro de Perfil (PF ou Empresa PJ)
+  const [newProfileType, setNewProfileType] = useState<WorkspaceType>('CORPORATE');
+  const [profileName, setProfileName] = useState('');
   const [legalName, setLegalName] = useState('');
-  const [documentCNPJ, setDocumentCNPJ] = useState('');
+  const [documentStr, setDocumentStr] = useState('');
+  const [profileFeedback, setProfileFeedback] = useState<string | null>(null);
+
+  // Edição rápida de perfil existente
+  const [editingWsId, setEditingWsId] = useState<string | null>(null);
+  const [editWsName, setEditWsName] = useState('');
+  const [editWsLegalName, setEditWsLegalName] = useState('');
+  const [editWsDocument, setEditWsDocument] = useState('');
 
   useEffect(() => {
     setSalaryStr(monthlySalary > 0 ? String(monthlySalary).replace('.', ',') : '');
   }, [monthlySalary, currentWorkspace.id]);
 
-  const fetchStatus = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch('/api/neon/status');
-      const data = await res.json();
-      setNeonStatus(data);
-    } catch {
-      setNeonStatus({
-        isConnected: false,
-        databaseUrl: 'Erro de requisição',
-        isConfigured: false,
-        error: 'Não foi possível consultar a rota /api/neon/status',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-  }, []);
+  const filteredCategories = useMemo(() => {
+    if (catFilter === 'ALL') return categories;
+    return categories.filter((c) => c.type === catFilter);
+  }, [categories, catFilter]);
 
   const handleSaveSalarySettings = (e: React.FormEvent) => {
     e.preventDefault();
-    const val = parseFloat(salaryStr.replace(/\./g, '').replace(',', '.'));
-    setMonthlySalary(isNaN(val) ? 0 : val);
+    const val = Math.max(0, parseBRLNumber(salaryStr));
+    setMonthlySalary(val);
     setSalarySavedFeedback(true);
     setTimeout(() => setSalarySavedFeedback(false), 2500);
   };
@@ -95,49 +97,107 @@ export function SettingsAndNeonView() {
     setNewCatName('');
   };
 
-  const handleCreateCompany = (e: React.FormEvent) => {
+  const handleCreateProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyName.trim()) return;
+    if (!profileName.trim()) return;
 
+    const isPersonal = newProfileType === 'PERSONAL';
     addWorkspace({
-      name: companyName,
-      type: 'CORPORATE',
-      legalName: legalName || undefined,
-      document: documentCNPJ || undefined,
+      name: profileName.trim(),
+      type: newProfileType,
+      legalName: !isPersonal && legalName.trim() ? legalName.trim() : undefined,
+      document: documentStr.trim() || undefined,
       defaultCurrency: 'BRL',
-      colorTheme: '#6366f1',
+      colorTheme: isPersonal ? '#10b981' : '#6366f1',
     });
 
-    setCompanyName('');
+    setProfileName('');
     setLegalName('');
-    setDocumentCNPJ('');
-    alert('Nova empresa/CNPJ cadastrada com sucesso com contexto 100% isolado!');
+    setDocumentStr('');
+    setProfileFeedback(
+      isPersonal
+        ? 'Perfil de Pessoa Física (PF) cadastrado e ativado com sucesso!'
+        : 'Empresa (PJ) cadastrada e ativada com contexto 100% isolado!'
+    );
+    setTimeout(() => setProfileFeedback(null), 3500);
+  };
+
+  const startEditWorkspace = (ws: Workspace) => {
+    setEditingWsId(ws.id);
+    setEditWsName(ws.name);
+    setEditWsLegalName(ws.legalName || '');
+    setEditWsDocument(ws.document || '');
+  };
+
+  const handleSaveEditWorkspace = (e: React.FormEvent, ws: Workspace) => {
+    e.preventDefault();
+    if (!editWsName.trim()) return;
+    updateWorkspace(ws.id, {
+      name: editWsName.trim(),
+      legalName: ws.type === 'CORPORATE' ? editWsLegalName.trim() || undefined : undefined,
+      document: editWsDocument.trim() || undefined,
+    });
+    setEditingWsId(null);
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Cabeçalho da Tela de Controle de Cadastros */}
+      <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+            <Settings className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+              Controle de Cadastros & Configurações
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Gerencie sua renda mensal, categorias financeiras e perfis de Pessoa Física (PF) e Empresas (PJ)
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <span
+            className={`px-3 py-1.5 rounded-xl font-semibold border flex items-center gap-1.5 ${
+              currentWorkspace.type === 'PERSONAL'
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20'
+            }`}
+          >
+            {currentWorkspace.type === 'PERSONAL' ? (
+              <User className="w-3.5 h-3.5" />
+            ) : (
+              <Building2 className="w-3.5 h-3.5" />
+            )}
+            <span>Ativo: {currentWorkspace.name}</span>
+          </span>
+        </div>
+      </div>
+
       {/* SEÇÃO 1: Configuração de Salário / Renda Mensal & Categorias */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card: Configuração de Salário / Renda Mensal */}
         <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4">
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
                 <Wallet className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                  Configuração de Salário / Renda Mensal
+                  Salário / Renda Base Mensal
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Base de cálculo para o indicador de gastos mensais em{' '}
+                  Base de cálculo para o saldo restante e orçamento em{' '}
                   <strong>{currentWorkspace.name}</strong>
                 </p>
               </div>
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-500">Salário / Renda Atual Configurada:</span>
+              <span className="text-xs text-slate-500">Salário / Renda Configurada:</span>
               <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
                 {monthlySalary > 0 ? formatMoney(monthlySalary) : 'Não definido'}
               </span>
@@ -152,7 +212,7 @@ export function SettingsAndNeonView() {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder="Ex: 8500,00"
+                  placeholder="Ex: 5.000,00"
                   value={salaryStr}
                   onChange={(e) => setSalaryStr(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -177,17 +237,36 @@ export function SettingsAndNeonView() {
 
         {/* Card: Gestão de Categorias Ativas */}
         <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
-              <Tag className="w-5 h-5" />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+                <Tag className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Categorias ({categories.length})
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Disponíveis ao criar ou editar transações neste perfil
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Categorias Ativas ({categories.length})
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Categorias disponíveis ao criar ou editar transações neste espaço
-              </p>
+
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium">
+              {(['ALL', 'EXPENSE', 'INCOME'] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setCatFilter(f)}
+                  className={`px-2 py-1 rounded-md transition-all ${
+                    catFilter === f
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                      : 'text-slate-500'
+                  }`}
+                >
+                  {f === 'ALL' ? 'Todas' : f === 'EXPENSE' ? 'Despesas' : 'Receitas'}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -223,291 +302,312 @@ export function SettingsAndNeonView() {
             </button>
           </form>
 
-          <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 pr-1">
-            {categories.map((cat) => (
-              <div key={cat.id} className="py-2 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: cat.color || '#10b981' }}
-                  />
-                  <span className="font-medium text-slate-800 dark:text-slate-200">{cat.name}</span>
-                  <span
-                    className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                      cat.type === 'INCOME'
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                    }`}
-                  >
-                    {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => deleteCategory(cat.id)}
-                  className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
-                  title="Remover Categoria"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* SEÇÃO 2: Painel do Neon PostgreSQL */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Neon PostgreSQL Serverless</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  Prisma ORM v6
-                </span>
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Banco de dados relacional em nuvem com auto-scaling e connection pooler
+          <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 pr-1">
+            {filteredCategories.length === 0 ? (
+              <p className="py-6 text-center text-xs text-slate-400">
+                Nenhuma categoria encontrada neste filtro.
               </p>
-            </div>
-          </div>
-
-          <button
-            onClick={fetchStatus}
-            disabled={isLoading}
-            className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-all disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Testar Conexão</span>
-          </button>
-        </div>
-
-        {/* Card de Status do Banco */}
-        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span
-                className={`w-3 h-3 rounded-full ${
-                  neonStatus?.isConnected ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-amber-500'
-                }`}
-              />
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                {neonStatus?.isConnected
-                  ? 'Conexão Estabelecida com o Neon DB'
-                  : 'Modo Local Ativo com Suporte ao Neon Configurado'}
-              </span>
-            </div>
-
-            {neonStatus?.latencyMs && (
-              <span className="text-[11px] font-mono text-emerald-500 font-semibold">
-                Latência: {neonStatus.latencyMs}ms
-              </span>
+            ) : (
+              filteredCategories.map((cat) => (
+                <div key={cat.id} className="py-2 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: cat.color || '#10b981' }}
+                    />
+                    <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                      {cat.name}
+                    </span>
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded shrink-0 ${
+                        cat.type === 'INCOME'
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm(`Deseja remover a categoria "${cat.name}"?`)) {
+                        deleteCategory(cat.id);
+                      }
+                    }}
+                    className="p-1 text-slate-400 hover:text-rose-500 transition-colors shrink-0"
+                    title="Remover Categoria"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))
             )}
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
-            <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-sans">String de Conexão (.env):</span>
-              <span className="text-slate-700 dark:text-slate-300 truncate block">
-                {neonStatus?.databaseUrl || 'postgresql://neondb_owner:••••••••@ep-sample-pooler...'}
-              </span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-sans">Schema & Entidades Mapeadas:</span>
-              <span className="text-slate-700 dark:text-slate-300 block font-sans font-semibold">
-                11 Entidades (Users, Workspaces, Accounts, Transactions, etc.)
-              </span>
-            </div>
-          </div>
-
-          {neonStatus?.error && (
-            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-              <div>
-                <strong>Aviso de Configuração:</strong> {neonStatus.error}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Guia Rápido de Configuração do Neon */}
-        <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-500/20 text-xs space-y-2">
-          <div className="font-bold text-indigo-900 dark:text-indigo-300 flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
-              Como plugar sua base de produção no Neon (neon.tech)
-            </span>
-            <a
-              href="https://neon.tech"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[11px] underline flex items-center gap-1 text-indigo-500 hover:text-indigo-400"
-            >
-              <span>Abrir Neon Console</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-          <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-300 text-[11px]">
-            <li>Crie ou selecione seu projeto gratuito no <strong>neon.tech</strong>.</li>
-            <li>Copie a string de conexão (Connection String Pooled) no Dashboard do Neon.</li>
-            <li>Cole a URL no arquivo <code>.env</code> na variável <code>DATABASE_URL</code> deste projeto.</li>
-            <li>
-              Execute no terminal do projeto: <code className="bg-slate-800 px-1 py-0.5 rounded text-white">npx prisma db push</code> para criar todas as 11 tabelas instantaneamente!
-            </li>
-          </ol>
         </div>
       </div>
 
-      {/* SEÇÃO 3: Gestão Multiempresa (Cadastro de novos CNPJs) */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+      {/* SEÇÃO 2: Cadastros de Perfis (Pessoa Física PF & Empresas PJ) */}
+      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
         <div>
           <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Building className="w-5 h-5 text-indigo-500" />
-            <span>Multiempresa & CNPJs Cadastrados</span>
+            <Building2 className="w-5 h-5 text-indigo-500" />
+            <span>Cadastros de Pessoa Física (PF) & Empresas (PJ)</span>
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Cadastre novas empresas para manter contas, transações e relatórios 100% isolados
+            Crie e gerencie perfis separados para manter contas, transações, salários e relatórios 100% isolados
           </p>
         </div>
 
-        {/* Lista de Empresas Cadastradas */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {workspaces.map((ws) => (
-            <div
-              key={ws.id}
-              className={`p-3.5 rounded-xl border ${
-                ws.id === currentWorkspace.id
-                  ? 'border-emerald-500 bg-emerald-500/5'
-                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold text-xs text-slate-800 dark:text-slate-200 truncate">
-                  {ws.name}
-                </span>
-                {ws.id === currentWorkspace.id && (
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500 text-white">
-                    ATIVO
-                  </span>
+        {/* Lista de Perfis PF e PJ Cadastrados */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {workspaces.map((ws) => {
+            const isWsPersonal = ws.type === 'PERSONAL';
+            const isActive = ws.id === currentWorkspace.id;
+            const isEditingThis = editingWsId === ws.id;
+
+            return (
+              <div
+                key={ws.id}
+                className={`p-4 rounded-xl border transition-all ${
+                  isActive
+                    ? 'border-emerald-500 bg-emerald-500/5'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40'
+                }`}
+              >
+                {isEditingThis ? (
+                  <form
+                    onSubmit={(e) => handleSaveEditWorkspace(e, ws)}
+                    className="space-y-2 text-xs"
+                  >
+                    <input
+                      type="text"
+                      required
+                      value={editWsName}
+                      onChange={(e) => setEditWsName(e.target.value)}
+                      placeholder={isWsPersonal ? 'Nome do perfil' : 'Nome fantasia'}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                    />
+                    {!isWsPersonal && (
+                      <input
+                        type="text"
+                        value={editWsLegalName}
+                        onChange={(e) => setEditWsLegalName(e.target.value)}
+                        placeholder="Razão Social (opcional)"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                      />
+                    )}
+                    <input
+                      type="text"
+                      value={editWsDocument}
+                      onChange={(e) => setEditWsDocument(e.target.value)}
+                      placeholder={isWsPersonal ? 'CPF (opcional)' : 'CNPJ (opcional)'}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
+                    />
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditingWsId(null)}
+                        className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                        title="Cancelar"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Salvar</span>
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                            isWsPersonal
+                              ? 'bg-emerald-500/10 text-emerald-500'
+                              : 'bg-indigo-500/10 text-indigo-500'
+                          }`}
+                        >
+                          {isWsPersonal ? (
+                            <User className="w-4 h-4" />
+                          ) : (
+                            <Building2 className="w-4 h-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <span className="font-bold text-xs text-slate-800 dark:text-slate-100 block truncate">
+                            {ws.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono block truncate">
+                            {ws.document || (isWsPersonal ? 'Pessoa Física (PF)' : 'Empresa (PJ)')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {isActive && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500 text-white shrink-0">
+                          ATIVO
+                        </span>
+                      )}
+                    </div>
+
+                    {ws.legalName && (
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                        {ws.legalName}
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentWorkspaceId(ws.id)}
+                        disabled={isActive}
+                        className={`text-[11px] font-semibold transition-colors ${
+                          isActive
+                            ? 'text-emerald-600 dark:text-emerald-400 cursor-default'
+                            : 'text-indigo-600 dark:text-indigo-400 hover:underline'
+                        }`}
+                      >
+                        {isActive ? 'Contexto em uso' : 'Ativar perfil →'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => startEditWorkspace(ws)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-indigo-500 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 transition-colors"
+                        title="Editar dados do cadastro"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
-              <span className="text-[10px] text-slate-400 font-mono block">
-                {ws.document || (ws.type === 'PERSONAL' ? 'Pessoa Física' : 'CNPJ')}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Formulário de Cadastro de Nova Empresa */}
-        <form onSubmit={handleCreateCompany} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 space-y-3 pt-3">
-          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-            Cadastrar Nova Empresa / Contexto
-          </span>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Formulário de Novo Cadastro (PF ou Empresa PJ) */}
+        <form
+          onSubmit={handleCreateProfile}
+          className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 space-y-4"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              Novo Cadastro de Perfil
+            </span>
+
+            {/* Seletor PF vs PJ */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-200/70 dark:bg-slate-900 text-xs">
+              <button
+                type="button"
+                onClick={() => setNewProfileType('PERSONAL')}
+                className={`px-3 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                  newProfileType === 'PERSONAL'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Pessoa Física (PF)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewProfileType('CORPORATE')}
+                className={`px-3 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                  newProfileType === 'CORPORATE'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Empresa (PJ)</span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            className={`grid grid-cols-1 ${
+              newProfileType === 'PERSONAL' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'
+            } gap-3`}
+          >
             <div>
-              <label className="block text-[11px] text-slate-500 mb-1">Nome Fantasia</label>
+              <label className="block text-[11px] text-slate-500 mb-1">
+                {newProfileType === 'PERSONAL' ? 'Nome do Perfil (PF)' : 'Nome Fantasia'}
+              </label>
               <input
                 type="text"
                 required
-                placeholder="Ex: Alfa Logística Ltda."
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                placeholder={
+                  newProfileType === 'PERSONAL'
+                    ? 'Ex: Pessoal, Família, Casal...'
+                    : 'Ex: Alfa Logística Ltda.'
+                }
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
+
+            {newProfileType === 'CORPORATE' && (
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">Razão Social</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Alfa Transportes e Logística Ltda."
+                  value={legalName}
+                  onChange={(e) => setLegalName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+            )}
+
             <div>
-              <label className="block text-[11px] text-slate-500 mb-1">Razão Social</label>
+              <label className="block text-[11px] text-slate-500 mb-1">
+                {newProfileType === 'PERSONAL' ? 'CPF (opcional)' : 'CNPJ (opcional)'}
+              </label>
               <input
                 type="text"
-                placeholder="Ex: Alfa Transportes e Logística Ltda."
-                value={legalName}
-                onChange={(e) => setLegalName(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-500 mb-1">CNPJ</label>
-              <input
-                type="text"
-                placeholder="00.000.000/0001-00"
-                value={documentCNPJ}
-                onChange={(e) => setDocumentCNPJ(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                placeholder={
+                  newProfileType === 'PERSONAL' ? '000.000.000-00' : '00.000.000/0001-00'
+                }
+                value={documentStr}
+                onChange={(e) => setDocumentStr(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
               />
             </div>
           </div>
-          <div className="flex justify-end">
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {profileFeedback ? (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{profileFeedback}</span>
+              </p>
+            ) : (
+              <span />
+            )}
+
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20"
+              className={`px-4 py-2 rounded-xl text-white text-xs font-bold shadow-md transition-all flex items-center gap-1.5 ${
+                newProfileType === 'PERSONAL'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                  : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
+              }`}
             >
-              + Adicionar Empresa
+              <Plus className="w-3.5 h-3.5" />
+              <span>
+                {newProfileType === 'PERSONAL' ? 'Cadastrar Pessoa Física' : 'Cadastrar Empresa'}
+              </span>
             </button>
           </div>
         </form>
-      </div>
-
-      {/* SEÇÃO 4: Segurança & Logs de Auditoria */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-        <div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Shield className="w-5 h-5 text-emerald-500" />
-            <span>Camadas de Segurança Ativas & Auditoria</span>
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Criptografia PBKDF2-SHA512, cookies de sessão assinados (HttpOnly), Rate Limiting e isolamento estrito de contexto
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-            <span className="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">
-              Criptografia PBKDF2-SHA512
-            </span>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              100.000 iterações com salt aleatório por senha e comparação timing-safe
-            </span>
-          </div>
-          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-            <span className="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">
-              Sessão Assinada & Rate Limit
-            </span>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Token HMAC em Cookie HttpOnly e proteção contra força bruta por IP
-            </span>
-          </div>
-          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-            <span className="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">
-              Headers & Sanitização XSS
-            </span>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              HSTS, X-Frame-Options DENY, nosniff e higienização de inputs nas APIs
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-2 pt-2">
-          {[
-            { action: 'AUTH_SECURITY', text: 'Proteção PBKDF2-SHA512, Cookie HttpOnly e Rate Limiting ativos', time: 'Ativo' },
-            { action: 'TRANSACTION_SYNC', text: 'Validação e sanitização de payloads financeiras com Neon HTTPS', time: 'Ativo' },
-            { action: 'CONTEXT_ISOLATION', text: 'Isolamento estrito entre espaços Pessoal (PF) e Corporativo (PJ)', time: 'Ativo' },
-          ].map((log, idx) => (
-            <div key={idx} className="flex items-center justify-between text-xs py-2 border-b border-slate-100 dark:border-slate-800 last:border-0 font-mono">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                  {log.action}
-                </span>
-                <span className="text-slate-700 dark:text-slate-300 font-sans">{log.text}</span>
-              </div>
-              <span className="text-emerald-500 text-[10px] font-semibold whitespace-nowrap">{log.time}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

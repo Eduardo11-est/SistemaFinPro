@@ -171,6 +171,56 @@ export async function verifyWorkspaceAccess(
 }
 
 /**
+ * Verifica se o e-mail pertence a uma conta de Administrador configurada na variável
+ * de ambiente ADMIN_EMAILS (lista separada por vírgula).
+ */
+export function isAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const raw = process.env.ADMIN_EMAILS || '';
+  if (!raw.trim()) return false;
+  const normalizedTarget = email.trim().toLowerCase();
+  const adminList = raw
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return adminList.includes(normalizedTarget);
+}
+
+/**
+ * Extrai o payload da sessão autenticada via cookie HttpOnly (se válido).
+ */
+export function resolveRequestSession(req: Request): SessionPayload | null {
+  const cookieHeader = req.headers.get('cookie') || '';
+  const match = cookieHeader
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+
+  if (!match) return null;
+  const token = decodeURIComponent(match.slice(SESSION_COOKIE_NAME.length + 1));
+  return verifySessionToken(token);
+}
+
+/**
+ * Valida no servidor se a requisição pertence a um usuário Administrador.
+ */
+export async function verifyAdminRequest(req: Request, db: PrismaClient): Promise<boolean> {
+  const session = resolveRequestSession(req);
+  if (session?.email) {
+    return isAdminEmail(session.email);
+  }
+
+  const userId = resolveRequestUserId(req);
+  if (!userId) return false;
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  return isAdminEmail(user?.email);
+}
+
+/**
  * Anexa o cookie HttpOnly de sessão na resposta NextResponse.
  */
 export function attachSessionCookie(res: NextResponse, userId: string, email: string): void {

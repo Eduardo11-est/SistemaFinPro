@@ -9,7 +9,8 @@ import {
   CalendarDays,
   PieChart,
   BarChart3,
-  Database,
+  Settings,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -18,8 +19,9 @@ interface SidebarProps {
 }
 
 export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }: SidebarProps) {
-  const { currentWorkspace } = useFinance();
+  const { currentWorkspace, currentUser } = useFinance();
   const isPersonal = currentWorkspace.type === 'PERSONAL';
+  const isAdmin = Boolean(currentUser?.isAdmin);
 
   const menuItems = useMemo(
     () => [
@@ -61,12 +63,22 @@ export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }
       },
       {
         id: 'settings',
-        label: 'Neon DB & Config',
-        icon: Database,
-        badge: 'Neon',
+        label: 'Cadastros & Config',
+        icon: Settings,
+        badge: null,
       },
+      ...(isAdmin
+        ? [
+            {
+              id: 'admin',
+              label: 'Admin & Neon DB',
+              icon: ShieldCheck,
+              badge: 'ADM',
+            },
+          ]
+        : []),
     ],
-    [isPersonal]
+    [isPersonal, isAdmin]
   );
 
   return (
@@ -132,33 +144,29 @@ export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }
         </div>
       </div>
 
-      {/* Rodapé da Sidebar: Status do Banco de Dados Neon */}
+      {/* Rodapé da Sidebar */}
       <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
-        <div
+        <button
+          type="button"
           onClick={() => setActiveView('settings')}
-          className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer group"
+          className="w-full text-left p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-              <Database className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Neon PostgreSQL</span>
+              <Settings className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Cadastros & Config</span>
             </div>
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <span className="text-[10px] text-slate-400 group-hover:text-emerald-500 transition-colors">
+              Abrir →
             </span>
           </div>
           <p className="text-[10px] text-slate-500 dark:text-slate-400">
-            Pooler Serverless Configurado
+            Salário, categorias e perfis PF / PJ
           </p>
-          <div className="mt-1 flex items-center justify-between text-[9px] text-slate-400">
-            <span>Prisma ORM v6</span>
-            <span className="group-hover:text-emerald-500 transition-colors">Configurar →</span>
-          </div>
-        </div>
+        </button>
 
         <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-          FinPro © 2026 • Segurança PBKDF2 & HTTPS
+          FinPro © 2026 • Controle Financeiro
         </div>
       </div>
     </aside>
