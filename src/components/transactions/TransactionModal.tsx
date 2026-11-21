@@ -54,6 +54,7 @@ export function TransactionModal() {
   const {
     isNewTransactionModalOpen,
     setIsNewTransactionModalOpen,
+    newTransactionPreset,
     editingTransaction,
     accounts,
     categories,
@@ -188,16 +189,24 @@ export function TransactionModal() {
       setRecurrenceEditScope('SINGLE');
       setIsInterContext(Boolean(editingTransaction.tags?.includes('pro-labore')));
     } else {
-      setType('EXPENSE');
+      const presetType = newTransactionPreset?.type || 'EXPENSE';
+      const presetAccountId =
+        newTransactionPreset?.accountId &&
+        accounts.some((a) => a.id === newTransactionPreset.accountId)
+          ? newTransactionPreset.accountId
+          : accounts[0]?.id || '';
+
+      setType(presetType);
       setDescription('');
       setAmountStr('');
       try {
         setDate(getDefaultDateForMonth(currentMonthPrefix));
       } catch {}
-      setAccountId(accounts[0]?.id || '');
+      setAccountId(presetAccountId);
       setTargetAccountId('');
-      const expCats = categories.filter((c) => c.type === 'EXPENSE');
-      const defaultCatId = expCats[0]?.id || '';
+      const targetCatType = presetType === 'INCOME' ? 'INCOME' : 'EXPENSE';
+      const defaultCats = categories.filter((c) => c.type === targetCatType);
+      const defaultCatId = defaultCats[0]?.id || '';
       setCategoryId(defaultCatId);
       setBudgetPillar(
         resolveTransactionPillar(
@@ -214,12 +223,19 @@ export function TransactionModal() {
       setTotalInstallments(2);
       setIsRecurring(false);
       setRecurrenceFrequency('MONTHLY');
+      setRecurrenceEditScope('SINGLE');
       setIsInterContext(false);
       setAttachedFile(null);
     }
     setIsCreatingCategory(false);
     setNewCategoryName('');
-  }, [isNewTransactionModalOpen, editingTransaction, workspaces, currentMonthPrefix]);
+  }, [
+    isNewTransactionModalOpen,
+    editingTransaction,
+    workspaces,
+    currentMonthPrefix,
+    newTransactionPreset,
+  ]);
 
   // Garante que a conta e a categoria selecionadas sejam sempre válidas quando as opções mudam
   useEffect(() => {

@@ -164,6 +164,16 @@ export async function DELETE(req: Request) {
       }
     }
 
+    // Desvincula referências opcionais antes de excluir a conta para evitar erro de chave estrangeira
+    await prisma.transaction.updateMany({
+      where: { targetAccountId: id },
+      data: { targetAccountId: null },
+    });
+    await prisma.payableReceivable.updateMany({
+      where: { accountId: id },
+      data: { accountId: null },
+    });
+
     await prisma.account.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

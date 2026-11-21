@@ -22,14 +22,46 @@ import {
   Pencil,
   Trash2,
   Sparkles,
+  ArrowLeftRight,
+  Repeat,
+  ShieldAlert,
 } from 'lucide-react';
-import { Account, AccountType, CurrencyType } from '@/types/finance';
+import { Account, AccountType, CurrencyType, Transaction } from '@/types/finance';
 import {
   BUDGET_PILLARS,
   buildMonthlyCardInvoice,
   calculateCardLimitSummary,
   resolveTransactionPillar,
 } from '@/lib/credit-card';
+import { getRecurrenceLabel } from '@/lib/recurrence';
+
+const ACCOUNT_COLORS = [
+  { hex: '#3b82f6', label: 'Azul' },
+  { hex: '#a855f7', label: 'Roxo' },
+  { hex: '#f97316', label: 'Laranja' },
+  { hex: '#10b981', label: 'Esmeralda' },
+  { hex: '#1e293b', label: 'Black' },
+  { hex: '#ef4444', label: 'Vermelho' },
+  { hex: '#eab308', label: 'Dourado' },
+  { hex: '#06b6d4', label: 'Ciano' },
+];
+
+function parseBRLNumber(raw: string): number {
+  const trimmed = raw.trim().replace(/\s+/g, '');
+  if (!trimmed) return 0;
+  if (trimmed.includes(',')) {
+    return parseFloat(trimmed.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(trimmed)) {
+    return parseFloat(trimmed.replace(/\./g, '')) || 0;
+  }
+  return parseFloat(trimmed) || 0;
+}
+
+function formatInputNumberBR(val: number): string {
+  if (!Number.isFinite(val)) return '0';
+  return String(val).replace('.', ',');
+}
 
 function shiftMonth(monthPrefix: string, delta: number): string {
   const [y, m] = monthPrefix.split('-').map(Number);
@@ -42,6 +74,30 @@ function formatMonthShort(monthPrefix: string): string {
   const names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   const idx = parseInt(m, 10) - 1;
   return `${names[idx] || m}/${y}`;
+}
+
+function formatDateBR(dateStr: string): string {
+  if (!dateStr) return '';
+  return dateStr.split('T')[0].split('-').reverse().join('/');
+}
+
+function getAccountTypeLabel(accType: AccountType): string {
+  switch (accType) {
+    case 'CHECKING':
+      return 'Conta Corrente';
+    case 'CREDIT_CARD':
+      return 'Cartão de Crédito';
+    case 'SAVINGS':
+      return 'Poupança';
+    case 'INVESTMENT':
+      return 'Investimentos';
+    case 'GATEWAY':
+      return 'Gateway de Pagamento';
+    case 'CASH':
+      return 'Carteira Física';
+    default:
+      return accType;
+  }
 }
 
 export function AccountsView() {
@@ -59,8 +115,9 @@ export function AccountsView() {
     currentMonthPrefix,
     setCurrentMonthPrefix,
     payCreditCardInvoice,
-    setIsNewTransactionModalOpen,
+    openNewTransactionModal,
     setEditingTransaction,
+    updateTransaction,
     deleteTransaction,
   } = useFinance();
 
@@ -79,6 +136,10 @@ export function AccountsView() {
   const [creditLimit, setCreditLimit] = useState('');
   const [closingDay, setClosingDay] = useState('28');
   const [dueDay, setDueDay] = useState('5');
+  const [color, setColor] = useState('#3b82f6');
+
+  // Modal de Confirmação Segura de Exclusão
+  const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
 
   // Modal de Pagamento de Fatura
   const [payingCardId, setPayingCardId] = useState<string | null>(null);
@@ -94,6 +155,16 @@ export function AccountsView() {
     [accounts]
   );
 
+  // Contagem de transações vinculadas por conta (para alerta de exclusão segura)
+  const txCountByAccount = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < transactions.length; i++) {
+      const accId = transactions[i].accountId;
+      map.set(accId, (map.get(accId) || 0) + 1);
+    }
+    return map;
+  }, [transactions]);
+
   // Mapa de limites dinâmicos por cartão (considerando faturas abertas + parcelas futuras)
   const cardLimitMap = useMemo(() => {
     const map = new Map<string, ReturnType<typeof calculateCardLimitSummary>>();
@@ -103,6 +174,57 @@ export function AccountsView() {
     }
     return map;
   }, [creditCards, transactions, currentMonthPrefix]);
+
+  // Resumo consolidado do topo (Contas Bancárias vs. Faturas & Limites de Cartão)
+  const accountsSummary = useMemo(() => {
+    let totalBankBalance = 0;
+    for (let i = 0; i < bankAccounts.length; i++) {
+      const acc = bankAccounts[i];
+      totalBankBalance += convertAmount(acc.currentBalance, acc.currency, activeCurrency);
+    }
+
+    let totalOpenInvoicesMonth = 0;
+    let totalAvailableCreditLimit = 0;
+    let totalCreditLimit = 0;
+
+    for (let i = 0; i < creditCards.length; i++) {
+      const card = creditCards[i];
+      const inv = buildMonthlyCardInvoice({
+        monthPrefix: currentMonthPrefix,
+        cards: [card],
+        selectedCardId: card.id,
+        transactions,
+        categories,
+      });
+      totalOpenInvoicesMonth += convertAmount(inv.openAmount, card.currency, activeCurrency);
+
+      const summary = cardLimitMap.get(card.id);
+      if (summary) {
+        totalAvailableCreditLimit += convertAmount(
+          summary.availableLimit,
+          card.currency,
+          activeCurrency
+        );
+        totalCreditLimit += convertAmount(summary.creditLimit, card.currency, activeCurrency);
+      }
+    }
+
+    return {
+      totalBankBalance,
+      totalOpenInvoicesMonth,
+      totalAvailableCreditLimit,
+      totalCreditLimit,
+    };
+  }, [
+    bankAccounts,
+    creditCards,
+    cardLimitMap,
+    transactions,
+    categories,
+    currentMonthPrefix,
+    convertAmount,
+    activeCurrency,
+  ]);
 
   // Lista de 6 meses na linha do tempo de faturas (1 anterior, atual, +4 futuros)
   const timelineMonths = useMemo(() => {
@@ -130,6 +252,13 @@ export function AccountsView() {
     setCreditLimit(defaultType === 'CREDIT_CARD' ? '5000' : '');
     setClosingDay('28');
     setDueDay('5');
+    setColor(
+      defaultType === 'CREDIT_CARD'
+        ? '#a855f7'
+        : defaultType === 'INVESTMENT'
+        ? '#eab308'
+        : '#3b82f6'
+    );
     setIsModalOpen(true);
   };
 
@@ -139,36 +268,38 @@ export function AccountsView() {
     setType(acc.type);
     setBankName(acc.bankName || '');
     setCurrency(acc.currency);
-    setInitialBalance(String(acc.currentBalance));
-    setCreditLimit(acc.creditLimit ? String(acc.creditLimit) : '');
+    setInitialBalance(formatInputNumberBR(acc.currentBalance));
+    setCreditLimit(acc.creditLimit ? formatInputNumberBR(acc.creditLimit) : '');
     setClosingDay(acc.closingDay ? String(acc.closingDay) : '28');
     setDueDay(acc.dueDay ? String(acc.dueDay) : '5');
+    setColor(acc.color || (acc.type === 'CREDIT_CARD' ? '#a855f7' : '#3b82f6'));
     setIsModalOpen(true);
   };
 
   const handleSaveAccount = (e: React.FormEvent) => {
     e.preventDefault();
-    const balance = parseFloat(initialBalance.replace(',', '.')) || 0;
-    const limit = creditLimit ? parseFloat(creditLimit.replace(',', '.')) : undefined;
+    const balance = parseBRLNumber(initialBalance);
+    const limit = creditLimit.trim() ? Math.max(0, parseBRLNumber(creditLimit)) : undefined;
     const cDay = closingDay ? Math.min(31, Math.max(1, parseInt(closingDay, 10))) : undefined;
     const dDay = dueDay ? Math.min(31, Math.max(1, parseInt(dueDay, 10))) : undefined;
 
     if (editingAccount) {
       updateAccount(editingAccount.id, {
-        name,
+        name: name.trim(),
         type,
-        bankName: bankName || undefined,
+        bankName: bankName.trim() || undefined,
         currency,
         currentBalance: balance,
         creditLimit: type === 'CREDIT_CARD' ? limit : undefined,
         closingDay: type === 'CREDIT_CARD' ? cDay : undefined,
         dueDay: type === 'CREDIT_CARD' ? dDay : undefined,
+        color,
       });
     } else {
       addAccount({
-        name,
+        name: name.trim(),
         type,
-        bankName: bankName || undefined,
+        bankName: bankName.trim() || undefined,
         currency,
         initialBalance: balance,
         currentBalance: balance,
@@ -176,13 +307,48 @@ export function AccountsView() {
         closingDay: type === 'CREDIT_CARD' ? cDay : undefined,
         dueDay: type === 'CREDIT_CARD' ? dDay : undefined,
         workspaceId: currentWorkspace.id,
-        color:
-          type === 'CREDIT_CARD' ? '#a855f7' : type === 'INVESTMENT' ? '#eab308' : '#3b82f6',
+        color,
       });
     }
 
     setIsModalOpen(false);
     setEditingAccount(null);
+  };
+
+  const handleConfirmDeleteAccount = () => {
+    if (!deletingAccount) return;
+    if (selectedCardId === deletingAccount.id) {
+      setSelectedCardId('ALL');
+    }
+    deleteAccount(deletingAccount.id);
+    setDeletingAccount(null);
+    if (editingAccount?.id === deletingAccount.id) {
+      setIsModalOpen(false);
+      setEditingAccount(null);
+    }
+  };
+
+  const handleDeleteInvoiceItem = (item: Transaction) => {
+    if (item.isRecurringProjection && item.recurringSourceId) {
+      const sourceTx = transactions.find((t) => t.id === item.recurringSourceId);
+      if (sourceTx) {
+        if (
+          confirm(
+            `"${item.description}" é uma projeção recorrente do lançamento de ${formatDateBR(sourceTx.date)}.\n\nDeseja encerrar a recorrência (mantendo o lançamento original, mas removendo das faturas futuras)?`
+          )
+        ) {
+          updateTransaction(sourceTx.id, {
+            isRecurring: false,
+            recurrenceFrequency: 'NONE',
+          });
+        }
+        return;
+      }
+    }
+
+    if (confirm(`Excluir "${item.description}" desta fatura?`)) {
+      deleteTransaction(item.id);
+    }
   };
 
   const handleConfirmPayInvoice = (e: React.FormEvent) => {
@@ -249,6 +415,10 @@ export function AccountsView() {
     }
   };
 
+  const deletingLinkedCount = deletingAccount
+    ? txCountByAccount.get(deletingAccount.id) || 0
+    : 0;
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Top Banner & Seletor de Visão */}
@@ -311,176 +481,364 @@ export function AccountsView() {
         </div>
       </div>
 
-      {/* ABA 1: GRID DE CONTAS E CARTÕES COM LIMITE DINÂMICO */}
+      {/* ABA 1: CONTAS BANCÁRIAS E CARTÕES SEPARADOS + RESUMO CONSOLIDADO */}
       {activeTab === 'ALL_ACCOUNTS' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {accounts.map((acc) => {
-              const Icon = getAccountIcon(acc.type);
-              const isCard = acc.type === 'CREDIT_CARD';
-              const cardSummary = isCard ? cardLimitMap.get(acc.id) : undefined;
-              const isNegative = acc.currentBalance < 0;
-
-              return (
-                <div
-                  key={acc.id}
-                  className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between hover:border-emerald-500/30 transition-all group"
+          {/* Resumo Consolidado no Topo */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">
+                  Saldo Total em Contas ({bankAccounts.length})
+                </span>
+                <span
+                  className={`text-lg sm:text-xl font-bold ${
+                    accountsSummary.totalBankBalance < 0
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-slate-900 dark:text-white'
+                  }`}
                 >
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className="w-9 h-9 rounded-xl flex items-center justify-center text-white"
-                          style={{ backgroundColor: acc.color || '#3b82f6' }}
-                        >
-                          <Icon className="w-4 h-4" />
+                  {formatMoney(accountsSummary.totalBankBalance)}
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  Contas bancárias, carteira e investimentos
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+                <Building className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">
+                  Faturas em Aberto ({formatMonthShort(currentMonthPrefix)})
+                </span>
+                <span className="text-lg sm:text-xl font-bold text-rose-600 dark:text-rose-400">
+                  {formatMoney(accountsSummary.totalOpenInvoicesMonth)}
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  {creditCards.length}{' '}
+                  {creditCards.length === 1 ? 'cartão cadastrado' : 'cartões cadastrados'}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0">
+                <Receipt className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">
+                  Limite Total Disponível
+                </span>
+                <span className="text-lg sm:text-xl font-bold text-purple-600 dark:text-purple-400">
+                  {formatMoney(accountsSummary.totalAvailableCreditLimit)}
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  De {formatMoney(accountsSummary.totalCreditLimit)} de limite total
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0">
+                <CreditCard className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* SEÇÃO 1: CONTAS BANCÁRIAS & CARTEIRAS */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <Building className="w-4 h-4 text-emerald-500" />
+                <span>Contas Bancárias & Carteiras ({bankAccounts.length})</span>
+              </h3>
+            </div>
+
+            {bankAccounts.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Nenhuma conta bancária ou carteira cadastrada neste workspace.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openCreateModal('CHECKING')}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Cadastrar Primeira Conta</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {bankAccounts.map((acc) => {
+                  const Icon = getAccountIcon(acc.type);
+                  const isNegative = acc.currentBalance < 0;
+                  const txCount = txCountByAccount.get(acc.id) || 0;
+
+                  return (
+                    <div
+                      key={acc.id}
+                      className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between hover:border-emerald-500/30 transition-all group"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm"
+                              style={{ backgroundColor: acc.color || '#3b82f6' }}
+                            >
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 truncate">
+                                {acc.name}
+                              </h3>
+                              <span className="text-[10px] text-slate-400 font-mono block truncate">
+                                {acc.bankName || getAccountTypeLabel(acc.type)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0">
+                            {acc.currency}
+                          </span>
                         </div>
-                        <div>
-                          <h3 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 line-clamp-1">
-                            {acc.name}
-                          </h3>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {acc.bankName || (isCard ? 'Cartão de Crédito' : acc.type)}
+
+                        <div className="my-3">
+                          <span className="text-[11px] text-slate-400 block mb-0.5">
+                            Saldo Disponível
+                          </span>
+                          <div
+                            className={`text-xl sm:text-2xl font-bold tracking-tight ${
+                              isNegative
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-slate-900 dark:text-white'
+                            }`}
+                          >
+                            {formatMoney(acc.currentBalance, acc.currency)}
+                          </div>
+                          {acc.currency !== activeCurrency && (
+                            <span className="text-[11px] text-slate-400 block mt-0.5">
+                              ≈{' '}
+                              {formatMoney(
+                                convertAmount(acc.currentBalance, acc.currency, activeCurrency)
+                              )}{' '}
+                              ({activeCurrency})
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono block mt-1">
+                            {txCount} {txCount === 1 ? 'lançamento vinculado' : 'lançamentos vinculados'}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                          {acc.currency}
-                        </span>
+                      {/* Ações Rápidas da Conta */}
+                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openNewTransactionModal({ type: 'TRANSFER', accountId: acc.id })
+                          }
+                          className="flex-1 py-1.5 px-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-[11px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                          title="Transferir desta conta"
+                        >
+                          <ArrowLeftRight className="w-3.5 h-3.5" />
+                          <span>Transferir</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => openEditModal(acc)}
-                          className="p-1 rounded-lg text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                          title="Editar Conta / Cartão"
+                          className="py-1.5 px-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                          title="Editar Conta / Ajustar Saldo"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingAccount(acc)}
+                          className="py-1.5 px-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                          title="Excluir Conta"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Excluir</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* SEÇÃO 2: CARTÕES DE CRÉDITO */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-purple-500" />
+                <span>Cartões de Crédito ({creditCards.length})</span>
+              </h3>
+            </div>
+
+            {creditCards.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Nenhum cartão de crédito cadastrado ainda. Cadastre para acompanhar limites e faturas mensais.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openCreateModal('CREDIT_CARD')}
+                  className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Cadastrar Cartão de Crédito</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {creditCards.map((acc) => {
+                  const cardSummary = cardLimitMap.get(acc.id);
+
+                  return (
+                    <div
+                      key={acc.id}
+                      className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between hover:border-purple-500/30 transition-all group"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm"
+                              style={{ backgroundColor: acc.color || '#a855f7' }}
+                            >
+                              <CreditCard className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 truncate">
+                                {acc.name}
+                              </h3>
+                              <span className="text-[10px] text-slate-400 font-mono block truncate">
+                                {acc.bankName || 'Cartão de Crédito'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0">
+                            {acc.currency}
+                          </span>
+                        </div>
+
+                        {cardSummary && (
+                          <>
+                            <div className="my-3 grid grid-cols-2 gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                              <div>
+                                <span className="text-[10px] text-slate-400 block">
+                                  Fatura Atual ({formatMonthShort(currentMonthPrefix)})
+                                </span>
+                                <span className="text-base sm:text-lg font-bold text-rose-600 dark:text-rose-400">
+                                  {formatMoney(cardSummary.currentMonthInvoiceAmount, acc.currency)}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-400 block">
+                                  Limite Disponível
+                                </span>
+                                <span className="text-base sm:text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                                  {formatMoney(cardSummary.availableLimit, acc.currency)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5 pt-1">
+                              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                <span>
+                                  Comprometido:{' '}
+                                  <strong className="text-slate-700 dark:text-slate-200">
+                                    {formatMoney(cardSummary.totalCommittedLimit, acc.currency)}
+                                  </strong>
+                                </span>
+                                <span>
+                                  Limite:{' '}
+                                  <strong className="text-slate-700 dark:text-slate-200">
+                                    {formatMoney(cardSummary.creditLimit, acc.currency)}
+                                  </strong>
+                                </span>
+                              </div>
+
+                              <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    cardSummary.usedPercent >= 90
+                                      ? 'bg-rose-500'
+                                      : cardSummary.usedPercent >= 70
+                                      ? 'bg-amber-500'
+                                      : 'bg-purple-500'
+                                  }`}
+                                  style={{ width: `${cardSummary.usedPercent}%` }}
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                                <span>
+                                  {cardSummary.usedPercent}% tomado • Futuras:{' '}
+                                  {formatMoney(cardSummary.futureInstallmentsAmount, acc.currency)}
+                                </span>
+                                <span>
+                                  Fecha {acc.closingDay || 28} • Vence {acc.dueDay || 5}
+                                </span>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Ações do Cartão */}
+                      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCardId(acc.id);
+                            setInvoiceMonth(currentMonthPrefix);
+                            setActiveTab('CREDIT_CARD_INVOICES');
+                          }}
+                          className="flex-1 py-1.5 px-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[11px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                          <span>Faturas</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openNewTransactionModal({ type: 'EXPENSE', accountId: acc.id })
+                          }
+                          className="py-1.5 px-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                          title="Lançar compra neste cartão"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Compra</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(acc)}
+                          className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+                          title="Editar Cartão"
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        {accounts.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm(`Deseja remover "${acc.name}"?`)) {
-                                deleteAccount(acc.id);
-                              }
-                            }}
-                            className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Excluir"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {isCard && cardSummary ? (
-                      <>
-                        <div className="my-3 grid grid-cols-2 gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
-                          <div>
-                            <span className="text-[10px] text-slate-400 block">
-                              Fatura Atual ({formatMonthShort(currentMonthPrefix)})
-                            </span>
-                            <span className="text-base sm:text-lg font-bold text-rose-600 dark:text-rose-400">
-                              {formatMoney(cardSummary.currentMonthInvoiceAmount, acc.currency)}
-                            </span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-400 block">
-                              Limite Disponível
-                            </span>
-                            <span className="text-base sm:text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                              {formatMoney(cardSummary.availableLimit, acc.currency)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5 pt-1">
-                          <div className="flex items-center justify-between text-[11px] text-slate-500">
-                            <span>
-                              Comprometido (Fatura + Parcelas):{' '}
-                              <strong className="text-slate-700 dark:text-slate-200">
-                                {formatMoney(cardSummary.totalCommittedLimit, acc.currency)}
-                              </strong>
-                            </span>
-                            <span>
-                              Limite:{' '}
-                              <strong className="text-slate-700 dark:text-slate-200">
-                                {formatMoney(cardSummary.creditLimit, acc.currency)}
-                              </strong>
-                            </span>
-                          </div>
-
-                          <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                cardSummary.usedPercent >= 90
-                                  ? 'bg-rose-500'
-                                  : cardSummary.usedPercent >= 70
-                                  ? 'bg-amber-500'
-                                  : 'bg-purple-500'
-                              }`}
-                              style={{ width: `${cardSummary.usedPercent}%` }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                            <span>
-                              {cardSummary.usedPercent}% tomado • Futuras:{' '}
-                              {formatMoney(cardSummary.futureInstallmentsAmount, acc.currency)}
-                            </span>
-                            <span>
-                              Fecha dia {acc.closingDay || 28} • Vence dia {acc.dueDay || 5}
-                            </span>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="my-3">
-                        <span className="text-[11px] text-slate-400 block mb-0.5">
-                          Saldo Disponível
-                        </span>
-                        <div
-                          className={`text-xl sm:text-2xl font-bold tracking-tight ${
-                            isNegative
-                              ? 'text-rose-600 dark:text-rose-400'
-                              : 'text-slate-900 dark:text-white'
-                          }`}
+                        <button
+                          type="button"
+                          onClick={() => setDeletingAccount(acc)}
+                          className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition-colors"
+                          title="Excluir Cartão"
                         >
-                          {formatMoney(acc.currentBalance, acc.currency)}
-                        </div>
-                        {acc.currency !== activeCurrency && (
-                          <span className="text-[11px] text-slate-400 block mt-0.5">
-                            ≈{' '}
-                            {formatMoney(
-                              convertAmount(acc.currentBalance, acc.currency, activeCurrency)
-                            )}{' '}
-                            ({activeCurrency})
-                          </span>
-                        )}
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    )}
-                  </div>
-
-                  {isCard && (
-                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedCardId(acc.id);
-                          setInvoiceMonth(currentMonthPrefix);
-                          setActiveTab('CREDIT_CARD_INVOICES');
-                        }}
-                        className="flex-1 py-1.5 px-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                      >
-                        <Receipt className="w-3.5 h-3.5" />
-                        <span>Ver Faturas Mês a Mês</span>
-                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -546,10 +904,13 @@ export function AccountsView() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingTransaction(null);
-                        setIsNewTransactionModalOpen(true);
-                      }}
+                      onClick={() =>
+                        openNewTransactionModal({
+                          type: 'EXPENSE',
+                          accountId:
+                            selectedCardId !== 'ALL' ? selectedCardId : creditCards[0]?.id,
+                        })
+                      }
                       className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -644,8 +1005,8 @@ export function AccountsView() {
                         {renderStatusBadge(currentInvoice.status)}
                       </div>
                       <p className="text-xs text-slate-500 font-mono mt-1">
-                        Fechamento: {currentInvoice.closingDate.split('-').reverse().join('/')} •
-                        Vencimento: {currentInvoice.dueDate.split('-').reverse().join('/')}
+                        Fechamento: {formatDateBR(currentInvoice.closingDate)} • Vencimento:{' '}
+                        {formatDateBR(currentInvoice.dueDate)}
                       </p>
                     </div>
 
@@ -735,7 +1096,7 @@ export function AccountsView() {
                       Detalhamento de Compras e Parcelas da Fatura ({formatMonthShort(invoiceMonth)})
                     </h4>
                     <p className="text-[11px] text-slate-400">
-                      Auditoria completa de todos os lançamentos à vista e parcelados que vencem neste ciclo
+                      Auditoria completa de todos os lançamentos à vista, parcelados e recorrentes que vencem neste ciclo
                     </p>
                   </div>
                   <span className="text-xs font-mono text-slate-500">
@@ -775,16 +1136,35 @@ export function AccountsView() {
                               className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                             >
                               <td className="py-3 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                                {item.date.split('T')[0].split('-').reverse().join('/')}
+                                {formatDateBR(item.date)}
                               </td>
                               <td className="py-3 px-4">
                                 <div className="font-semibold text-slate-800 dark:text-slate-200">
                                   {item.description}
                                 </div>
-                                <div className="flex items-center gap-1.5 mt-0.5">
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                                   {item.isInstallment && (
                                     <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 font-semibold">
                                       Parcela {item.installmentNumber}/{item.totalInstallments}
+                                    </span>
+                                  )}
+                                  {item.isRecurring && (
+                                    <span
+                                      className={`text-[9px] font-semibold px-1.5 py-0.2 rounded inline-flex items-center gap-1 border ${
+                                        item.isRecurringProjection
+                                          ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25'
+                                          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                      }`}
+                                    >
+                                      <Repeat className="w-2.5 h-2.5" />
+                                      <span>
+                                        Recorrente
+                                        {item.recurrenceFrequency &&
+                                        item.recurrenceFrequency !== 'NONE'
+                                          ? ` • ${getRecurrenceLabel(item.recurrenceFrequency)}`
+                                          : ''}
+                                        {item.isRecurringProjection ? ' (Projetado)' : ''}
+                                      </span>
                                     </span>
                                   )}
                                   {item.notes && (
@@ -831,19 +1211,23 @@ export function AccountsView() {
                                     type="button"
                                     onClick={() => setEditingTransaction(item)}
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-500"
-                                    title="Editar"
+                                    title={
+                                      item.isRecurringProjection
+                                        ? 'Editar este mês ou série recorrente'
+                                        : 'Editar'
+                                    }
                                   >
                                     <Pencil className="w-3.5 h-3.5" />
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      if (confirm(`Excluir "${item.description}" desta fatura?`)) {
-                                        deleteTransaction(item.id);
-                                      }
-                                    }}
+                                    onClick={() => handleDeleteInvoiceItem(item)}
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500"
-                                    title="Excluir"
+                                    title={
+                                      item.isRecurringProjection
+                                        ? 'Encerrar recorrência'
+                                        : 'Excluir'
+                                    }
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -865,7 +1249,7 @@ export function AccountsView() {
       {/* Modal para Adicionar / Editar Conta ou Cartão */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
                 {editingAccount
@@ -944,6 +1328,34 @@ export function AccountsView() {
                 />
               </div>
 
+              {/* Cor Personalizada */}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Cor de Identificação
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {ACCOUNT_COLORS.map((c) => {
+                    const active = color.toLowerCase() === c.hex.toLowerCase();
+                    return (
+                      <button
+                        key={c.hex}
+                        type="button"
+                        onClick={() => setColor(c.hex)}
+                        title={c.label}
+                        className={`w-7 h-7 rounded-lg transition-all flex items-center justify-center ${
+                          active
+                            ? 'ring-2 ring-offset-2 ring-emerald-500 dark:ring-offset-slate-900 scale-110'
+                            : 'opacity-80 hover:opacity-100'
+                        }`}
+                        style={{ backgroundColor: c.hex }}
+                      >
+                        {active && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {type !== 'CREDIT_CARD' && (
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -954,7 +1366,7 @@ export function AccountsView() {
                     placeholder="0,00"
                     value={initialBalance}
                     onChange={(e) => setInitialBalance(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold"
                   />
                 </div>
               )}
@@ -972,7 +1384,7 @@ export function AccountsView() {
                       <input
                         type="text"
                         required
-                        placeholder="5000"
+                        placeholder="5.000,00"
                         value={creditLimit}
                         onChange={(e) => setCreditLimit(e.target.value)}
                         className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-semibold"
@@ -1012,22 +1424,113 @@ export function AccountsView() {
                 </div>
               )}
 
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3 py-1.5 text-xs text-slate-500"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold"
-                >
-                  {editingAccount ? 'Salvar Alterações' : 'Cadastrar'}
-                </button>
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                {editingAccount ? (
+                  <button
+                    type="button"
+                    onClick={() => setDeletingAccount(editingAccount)}
+                    className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Excluir</span>
+                  </button>
+                ) : (
+                  <span />
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold"
+                  >
+                    {editingAccount ? 'Salvar Alterações' : 'Cadastrar'}
+                  </button>
+                </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação Segura de Exclusão */}
+      {deletingAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-rose-500/30 shadow-2xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-500 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                    Excluir {deletingAccount.type === 'CREDIT_CARD' ? 'Cartão' : 'Conta'}?
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {deletingAccount.name} ({getAccountTypeLabel(deletingAccount.type)})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeletingAccount(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300">
+              {deletingLinkedCount > 0 ? (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-700 dark:text-rose-300">
+                  <strong>Atenção:</strong> esta{' '}
+                  {deletingAccount.type === 'CREDIT_CARD' ? 'fatura/cartão' : 'conta'} possui{' '}
+                  <strong>
+                    {deletingLinkedCount}{' '}
+                    {deletingLinkedCount === 1
+                      ? 'lançamento vinculado'
+                      : 'lançamentos vinculados'}
+                  </strong>
+                  . Ao excluir, todos esses lançamentos também serão removidos permanentemente.
+                </div>
+              ) : (
+                <p>
+                  Nenhum lançamento está vinculado a este cadastro. A remoção não afetará seu
+                  histórico de transações.
+                </p>
+              )}
+
+              {accounts.length === 1 && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300">
+                  Esta é a única conta cadastrada neste workspace. Você poderá cadastrar uma nova
+                  conta ou cartão logo em seguida.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDeletingAccount(null)}
+                className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAccount}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/20"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Confirmar Exclusão</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

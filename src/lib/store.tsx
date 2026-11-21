@@ -16,6 +16,7 @@ import {
   Category,
   CostCenter,
   Transaction,
+  TransactionType,
   PayableReceivable,
   Budget,
   Goal,
@@ -112,6 +113,8 @@ interface FinanceContextType {
   // Modals & UI States
   isNewTransactionModalOpen: boolean;
   setIsNewTransactionModalOpen: (open: boolean) => void;
+  newTransactionPreset: { type?: TransactionType; accountId?: string } | null;
+  openNewTransactionModal: (preset?: { type?: TransactionType; accountId?: string }) => void;
   activeView: string;
   setActiveView: (view: string) => void;
   theme: 'dark' | 'light';
@@ -220,6 +223,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   // Modals & Editing state
   const [isNewTransactionModalOpen, setIsNewTransactionModalOpen] = useState(false);
   const [editingTransaction, setEditingTransactionState] = useState<Transaction | null>(null);
+  const [newTransactionPreset, setNewTransactionPreset] = useState<{
+    type?: TransactionType;
+    accountId?: string;
+  } | null>(null);
 
   // Request deduplication refs
   const inFlightSyncRef = useRef<Promise<void> | null>(null);
@@ -228,14 +235,25 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const setEditingTransaction = useCallback((tx: Transaction | null) => {
     setEditingTransactionState(tx);
     if (tx) {
+      setNewTransactionPreset(null);
       setIsNewTransactionModalOpen(true);
     }
   }, []);
+
+  const openNewTransactionModal = useCallback(
+    (preset?: { type?: TransactionType; accountId?: string }) => {
+      setEditingTransactionState(null);
+      setNewTransactionPreset(preset || null);
+      setIsNewTransactionModalOpen(true);
+    },
+    []
+  );
 
   const handleSetModalOpen = useCallback((open: boolean) => {
     setIsNewTransactionModalOpen(open);
     if (!open) {
       setEditingTransactionState(null);
+      setNewTransactionPreset(null);
     }
   }, []);
 
@@ -997,6 +1015,31 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
 
+    // Sincroniza imediatamente em memória a remoção em cascata das transações vinculadas
+    setTransactions((prev) => {
+      const updated = prev
+        .filter((tx) => tx.accountId !== id)
+        .map((tx) => (tx.targetAccountId === id ? { ...tx, targetAccountId: undefined } : tx));
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    setPayablesReceivables((prev) => {
+      const updated = prev.map((pr) =>
+        pr.accountId === id ? { ...pr, accountId: undefined } : pr
+      );
+      if (uid) {
+        try {
+          localStorage.setItem(getUserStorageKey(uid, 'pay'), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
     if (!id.startsWith('acc-')) {
       fetch(
         `/api/accounts?id=${encodeURIComponent(id)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`,
@@ -1353,51 +1396,80 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const card = accounts.find((a) => a.id === cardId);
       if (!card) return;
 
-      const invoiceItems = transactions.filter(
+      const monthTxs = getTransactionsForMonth(transactions, monthPrefix);
+      const invoiceItems = monthTxs.filter(
         (t) =>
           t.accountId === cardId &&
           t.type === 'EXPENSE' &&
           t.status !== 'CANCELLED' &&
-          t.date.startsWith(monthPrefix) &&
           !t.tags?.includes('fatura-paga')
       );
 
       if (invoiceItems.length === 0) return;
 
+      const realOpenItems = invoiceItems.filter((i) => !i.isRecurringProjection);
+      const projectedOpenItems = invoiceItems.filter((i) => i.isRecurringProjection);
+
       const totalOpen =
         Math.round(invoiceItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
-      const itemIds = new Set(invoiceItems.map((i) => i.id));
+      const realItemIds = new Set(realOpenItems.map((i) => i.id));
 
-      // 1. Marca todos os itens da fatura daquele mês como pagos ('fatura-paga')
-      setTransactions((prev) => {
-        const updated = prev.map((tx) => {
-          if (!itemIds.has(tx.id)) return tx;
-          const nextTags = Array.from(new Set([...(tx.tags || []), 'fatura-paga']));
-          return { ...tx, tags: nextTags };
+      // 1. Marca todos os itens reais da fatura daquele mês como pagos ('fatura-paga')
+      if (realOpenItems.length > 0) {
+        setTransactions((prev) => {
+          const updated = prev.map((tx) => {
+            if (!realItemIds.has(tx.id)) return tx;
+            const nextTags = Array.from(new Set([...(tx.tags || []), 'fatura-paga']));
+            return { ...tx, tags: nextTags };
+          });
+          if (uid) {
+            try {
+              localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
+            } catch {}
+          }
+          return updated;
         });
-        if (uid) {
-          try {
-            localStorage.setItem(getUserStorageKey(uid, 'tx'), JSON.stringify(updated));
-          } catch {}
-        }
-        return updated;
+
+        realOpenItems.forEach((tx) => {
+          const nextTags = Array.from(new Set([...(tx.tags || []), 'fatura-paga']));
+          if (!tx.id.startsWith('tx-')) {
+            fetch('/api/transactions', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(uid ? { 'x-user-id': uid } : {}),
+              },
+              body: JSON.stringify({ id: tx.id, tags: nextTags, userId: uid }),
+            }).catch(() => {});
+          }
+        });
+      }
+
+      // 2. Materializa itens recorrentes projetados desta fatura já marcados como pagos
+      projectedOpenItems.forEach((proj) => {
+        const nextTags = Array.from(new Set([...(proj.tags || []), 'fatura-paga']));
+        addTransaction({
+          type: proj.type,
+          description: proj.description,
+          amount: proj.amount,
+          date: proj.date,
+          status: 'COMPLETED',
+          paymentMethod: proj.paymentMethod || 'Cartão de Crédito',
+          currency: proj.currency,
+          exchangeRate: proj.exchangeRate,
+          notes: proj.notes,
+          isRecurring: false,
+          recurrenceFrequency: 'NONE',
+          linkedTransactionId: proj.recurringSourceId,
+          tags: nextTags,
+          workspaceId: proj.workspaceId,
+          accountId: proj.accountId,
+          categoryId: proj.categoryId,
+          costCenterId: proj.costCenterId,
+        });
       });
 
-      invoiceItems.forEach((tx) => {
-        const nextTags = Array.from(new Set([...(tx.tags || []), 'fatura-paga']));
-        if (!tx.id.startsWith('tx-')) {
-          fetch('/api/transactions', {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(uid ? { 'x-user-id': uid } : {}),
-            },
-            body: JSON.stringify({ id: tx.id, tags: nextTags, userId: uid }),
-          }).catch(() => {});
-        }
-      });
-
-      // 2. Registra a transferência de pagamento da conta bancária para o cartão de crédito
+      // 3. Registra a transferência de pagamento da conta bancária para o cartão de crédito
       if (sourceAccountId && totalOpen > 0) {
         addTransaction({
           type: 'TRANSFER',
@@ -1955,6 +2027,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
       isNewTransactionModalOpen,
       setIsNewTransactionModalOpen: handleSetModalOpen,
+      newTransactionPreset,
+      openNewTransactionModal,
       activeView,
       setActiveView,
       theme,
@@ -2014,6 +2088,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       isNewTransactionModalOpen,
       handleSetModalOpen,
+      newTransactionPreset,
+      openNewTransactionModal,
       activeView,
       theme,
       toggleTheme,
