@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { BUDGET_PILLARS, BudgetPillar, resolveTransactionPillar } from '@/lib/credit-card';
+import { getTransactionsForMonth } from '@/lib/recurrence';
 
 export function BudgetsAndGoalsView() {
   const {
@@ -74,11 +75,11 @@ export function BudgetsAndGoalsView() {
     };
 
     let currentMonthCardInvoiceTotal = 0;
+    const monthTxs = getTransactionsForMonth(transactions, currentMonthPrefix);
 
-    for (let i = 0; i < transactions.length; i++) {
-      const tx = transactions[i];
+    for (let i = 0; i < monthTxs.length; i++) {
+      const tx = monthTxs[i];
       if (tx.type !== 'EXPENSE' || tx.status === 'CANCELLED') continue;
-      if (!tx.date.startsWith(currentMonthPrefix)) continue;
 
       const pillar = resolveTransactionPillar(tx, categories);
       spentByPillar[pillar].total += tx.amount;

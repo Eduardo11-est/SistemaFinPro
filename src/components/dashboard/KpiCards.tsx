@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { BUDGET_PILLARS, BudgetPillar, resolveTransactionPillar } from '@/lib/credit-card';
+import { getTransactionsForMonth } from '@/lib/recurrence';
 
 export function KpiCards() {
   const {
@@ -36,10 +37,11 @@ export function KpiCards() {
 
   let currentMonthCardInvoice = 0;
   const pillarTotals: Record<BudgetPillar, number> = { NEEDS: 0, WANTS: 0, GOALS: 0 };
+  const monthTxs = getTransactionsForMonth(transactions, currentMonthPrefix);
 
-  for (let i = 0; i < transactions.length; i++) {
-    const tx = transactions[i];
-    if (tx.type === 'EXPENSE' && tx.status !== 'CANCELLED' && tx.date.startsWith(currentMonthPrefix)) {
+  for (let i = 0; i < monthTxs.length; i++) {
+    const tx = monthTxs[i];
+    if (tx.type === 'EXPENSE' && tx.status !== 'CANCELLED') {
       if (creditCardIds.has(tx.accountId)) {
         currentMonthCardInvoice += tx.amount;
       }

@@ -23,9 +23,11 @@ import {
   X,
   Calendar,
   Upload,
+  Repeat,
 } from 'lucide-react';
 import { Account, Category, CostCenter, CurrencyType, Transaction, TransactionType } from '@/types/finance';
 import { projectInstallments } from '@/lib/credit-card';
+import { getRecurrenceLabel, getTransactionsForMonth } from '@/lib/recurrence';
 
 interface TransactionRowProps {
   tx: Transaction;
@@ -94,6 +96,23 @@ const TransactionRow = React.memo(function TransactionRow({
               {tx.isInstallment && (
                 <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
                   Parcela {tx.installmentNumber}/{tx.totalInstallments}
+                </span>
+              )}
+              {tx.isRecurring && (
+                <span
+                  className={`text-[9px] font-semibold px-1.5 py-0.2 rounded inline-flex items-center gap-1 border ${
+                    tx.isRecurringProjection
+                      ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25'
+                      : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                  }`}
+                >
+                  <Repeat className="w-2.5 h-2.5" />
+                  <span>
+                    Recorrente{tx.recurrenceFrequency && tx.recurrenceFrequency !== 'NONE'
+                      ? ` • ${getRecurrenceLabel(tx.recurrenceFrequency)}`
+                      : ''}
+                    {tx.isRecurringProjection ? ' (Projetado)' : ''}
+                  </span>
                 </span>
               )}
               {tx.tags?.map((t, idx) => (
@@ -168,7 +187,11 @@ const TransactionRow = React.memo(function TransactionRow({
             type="button"
             onClick={() => onEdit(tx)}
             className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
-            title="Editar Transação"
+            title={
+              tx.isRecurringProjection
+                ? 'Editar Regra Recorrente Original'
+                : 'Editar Transação'
+            }
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
@@ -176,7 +199,11 @@ const TransactionRow = React.memo(function TransactionRow({
             type="button"
             onClick={() => onDelete(tx)}
             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-            title="Excluir Transação"
+            title={
+              tx.isRecurringProjection
+                ? 'Encerrar Recorrência (remover dos meses futuros)'
+                : 'Excluir Transação'
+            }
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -239,6 +266,7 @@ export function TransactionListView() {
     convertAmount,
     activeCurrency,
     addTransactionsBatch,
+    updateTransaction,
     deleteTransaction,
     setEditingTransaction,
     setIsNewTransactionModalOpen,
@@ -253,6 +281,7 @@ export function TransactionListView() {
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [periodFilter, setPeriodFilter] = useState<'SELECTED_MONTH' | 'ALL'>('SELECTED_MONTH');
   const [typeFilter, setTypeFilter] = useState<'ALL' | TransactionType>('ALL');
   const [accountFilter, setAccountFilter] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
@@ -290,15 +319,21 @@ export function TransactionListView() {
     return map;
   }, [costCenters]);
 
+  // Transações do mês selecionado (reais + projeções dinâmicas de recorrentes)
+  const monthTransactions = useMemo(
+    () => getTransactionsForMonth(transactions, currentMonthPrefix),
+    [transactions, currentMonthPrefix]
+  );
+
   // Cálculo de despesas e receitas do mês selecionado em relação ao salário
   const monthlyOverview = useMemo(() => {
     let monthExpenses = 0;
     let monthIncomes = 0;
     let monthExpenseCount = 0;
 
-    for (let i = 0; i < transactions.length; i++) {
-      const tx = transactions[i];
-      if (tx.status !== 'CANCELLED' && tx.date.startsWith(currentMonthPrefix)) {
+    for (let i = 0; i < monthTransactions.length; i++) {
+      const tx = monthTransactions[i];
+      if (tx.status !== 'CANCELLED') {
         const converted = convertAmount(tx.amount, tx.currency, activeCurrency);
         if (tx.type === 'EXPENSE') {
           monthExpenses += converted;
@@ -322,13 +357,14 @@ export function TransactionListView() {
       remainingSalary,
       usedPercentage,
     };
-  }, [transactions, currentMonthPrefix, convertAmount, activeCurrency, monthlySalary]);
+  }, [monthTransactions, convertAmount, activeCurrency, monthlySalary]);
 
   // Transações filtradas com busca adiada (deferred) para não travar a digitação
   const filteredTransactions = useMemo(() => {
     const normalizedSearch = deferredSearchTerm.trim().toLowerCase();
+    const sourceList = periodFilter === 'SELECTED_MONTH' ? monthTransactions : transactions;
 
-    return transactions.filter((tx) => {
+    return sourceList.filter((tx) => {
       if (typeFilter !== 'ALL' && tx.type !== typeFilter) return false;
       if (accountFilter !== 'ALL' && tx.accountId !== accountFilter) return false;
       if (categoryFilter !== 'ALL' && tx.categoryId !== categoryFilter) return false;
@@ -346,12 +382,29 @@ export function TransactionListView() {
 
       return true;
     });
-  }, [transactions, typeFilter, accountFilter, categoryFilter, deferredSearchTerm, categoryMap]);
+  }, [
+    transactions,
+    monthTransactions,
+    periodFilter,
+    typeFilter,
+    accountFilter,
+    categoryFilter,
+    deferredSearchTerm,
+    categoryMap,
+  ]);
 
   // Reseta para a página 1 sempre que um filtro for alterado
   useEffect(() => {
     setCurrentPage(1);
-  }, [deferredSearchTerm, typeFilter, accountFilter, categoryFilter, pageSize]);
+  }, [
+    deferredSearchTerm,
+    periodFilter,
+    currentMonthPrefix,
+    typeFilter,
+    accountFilter,
+    categoryFilter,
+    pageSize,
+  ]);
 
   const totalItems = filteredTransactions.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -381,18 +434,41 @@ export function TransactionListView() {
 
   const handleEditTx = useCallback(
     (tx: Transaction) => {
+      if (tx.isRecurringProjection && tx.recurringSourceId) {
+        const sourceTx = transactions.find((t) => t.id === tx.recurringSourceId);
+        if (sourceTx) {
+          setEditingTransaction(sourceTx);
+          return;
+        }
+      }
       setEditingTransaction(tx);
     },
-    [setEditingTransaction]
+    [setEditingTransaction, transactions]
   );
 
   const handleDeleteTx = useCallback(
     (tx: Transaction) => {
+      if (tx.isRecurringProjection && tx.recurringSourceId) {
+        const sourceTx = transactions.find((t) => t.id === tx.recurringSourceId);
+        if (sourceTx) {
+          if (
+            confirm(
+              `"${tx.description}" é uma projeção recorrente do lançamento de ${formatDateBR(sourceTx.date)}.\n\nDeseja encerrar a recorrência (mantendo o lançamento original, mas removendo dos meses futuros)?`
+            )
+          ) {
+            updateTransaction(sourceTx.id, {
+              isRecurring: false,
+              recurrenceFrequency: 'NONE',
+            });
+          }
+          return;
+        }
+      }
       if (confirm(`Deseja excluir o lançamento "${tx.description}"?`)) {
         deleteTransaction(tx.id);
       }
     },
-    [deleteTransaction]
+    [deleteTransaction, transactions, updateTransaction]
   );
 
   const handleOpenNewModal = useCallback(() => {
@@ -867,6 +943,17 @@ export function TransactionListView() {
 
         {/* Filtros em Linha */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Período */}
+          <select
+            value={periodFilter}
+            onChange={(e) => setPeriodFilter(e.target.value as 'SELECTED_MONTH' | 'ALL')}
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-xs font-medium text-slate-700 dark:text-slate-300 focus:outline-none"
+            title="Filtrar lançamentos por período"
+          >
+            <option value="SELECTED_MONTH">{formatMonthLabel(currentMonthPrefix)}</option>
+            <option value="ALL">Todos os Meses</option>
+          </select>
+
           {/* Tipo */}
           <select
             value={typeFilter}
@@ -958,7 +1045,28 @@ export function TransactionListView() {
               {paginatedTransactions.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
-                    Nenhum lançamento encontrado para os filtros selecionados.
+                    {periodFilter === 'SELECTED_MONTH' ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <span>
+                          Nenhum lançamento encontrado em{' '}
+                          <strong className="text-slate-600 dark:text-slate-300">
+                            {formatMonthLabel(currentMonthPrefix)}
+                          </strong>
+                          .
+                        </span>
+                        {transactions.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setPeriodFilter('ALL')}
+                            className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+                          >
+                            Ver lançamentos de todos os meses ({transactions.length})
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      'Nenhum lançamento encontrado para os filtros selecionados.'
+                    )}
                   </td>
                 </tr>
               ) : (

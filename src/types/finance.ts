@@ -98,6 +98,8 @@ export interface Transaction {
   // Recorrência
   isRecurring?: boolean;
   recurrenceFrequency?: RecurrenceFrequency;
+  isRecurringProjection?: boolean;
+  recurringSourceId?: string;
 
   // Vínculos Inter-Contexto (PJ -> PF)
   linkedTransactionId?: string;

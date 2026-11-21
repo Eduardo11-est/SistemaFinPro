@@ -1,4 +1,5 @@
 import { Account, Category, Transaction } from '@/types/finance';
+import { getTransactionsForMonth } from './recurrence';
 
 export type BudgetPillar = 'NEEDS' | 'WANTS' | 'GOALS';
 
@@ -348,13 +349,13 @@ export function buildMonthlyCardInvoice(params: {
   const dueDate = `${monthPrefix}-${String(Math.min(dueDay, maxDay)).padStart(2, '0')}`;
   const closingDate = `${monthPrefix}-${String(Math.min(closingDay, maxDay)).padStart(2, '0')}`;
 
-  const items = transactions
+  const monthTransactions = getTransactionsForMonth(transactions, monthPrefix);
+  const items = monthTransactions
     .filter(
       (tx) =>
         targetCardIds.has(tx.accountId) &&
         tx.type === 'EXPENSE' &&
-        tx.status !== 'CANCELLED' &&
-        tx.date.startsWith(monthPrefix)
+        tx.status !== 'CANCELLED'
     )
     .sort((a, b) => a.date.localeCompare(b.date));
 

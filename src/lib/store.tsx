@@ -32,6 +32,7 @@ import {
   INITIAL_BUDGETS,
   INITIAL_GOALS,
 } from './mock-data';
+import { getTransactionsForMonth } from './recurrence';
 
 interface FinanceContextType {
   // Auth
@@ -899,15 +900,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   const currentBudgets = useMemo(() => {
     const wsBudgets = budgets.filter((b) => b.workspaceId === currentWorkspaceId);
+    const monthTxs = getTransactionsForMonth(currentTransactions, currentMonthPrefix);
     const spentByCategory = new Map<string, number>();
-    for (let i = 0; i < currentTransactions.length; i++) {
-      const tx = currentTransactions[i];
-      if (
-        tx.type === 'EXPENSE' &&
-        tx.status === 'COMPLETED' &&
-        tx.categoryId &&
-        tx.date.startsWith(currentMonthPrefix)
-      ) {
+    for (let i = 0; i < monthTxs.length; i++) {
+      const tx = monthTxs[i];
+      if (tx.type === 'EXPENSE' && tx.status === 'COMPLETED' && tx.categoryId) {
         const prev = spentByCategory.get(tx.categoryId) || 0;
         spentByCategory.set(tx.categoryId, prev + tx.amount);
       }
@@ -1843,9 +1840,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     let monthIncome = 0;
     let monthExpense = 0;
 
-    for (let i = 0; i < currentTransactions.length; i++) {
-      const tx = currentTransactions[i];
-      if (tx.status === 'COMPLETED' && tx.date.startsWith(currentMonthPrefix)) {
+    const monthTxs = getTransactionsForMonth(currentTransactions, currentMonthPrefix);
+    for (let i = 0; i < monthTxs.length; i++) {
+      const tx = monthTxs[i];
+      if (tx.status === 'COMPLETED') {
         const converted = convertAmount(tx.amount, tx.currency, activeCurrency);
         if (tx.type === 'INCOME') monthIncome += converted;
         else if (tx.type === 'EXPENSE') monthExpense += converted;

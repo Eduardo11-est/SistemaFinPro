@@ -14,6 +14,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import { TrendingUp } from 'lucide-react';
+import { getTransactionsForMonth } from '@/lib/recurrence';
 
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
@@ -33,20 +34,19 @@ export const CashFlowChart = React.memo(function CashFlowChart() {
       const m = d.getMonth();
       const key = `${y}-${String(m + 1).padStart(2, '0')}`;
       const label = i === 0 ? `${MONTH_NAMES[m]} (Atual)` : MONTH_NAMES[m];
-      buckets.set(key, { label, receitas: 0, despesas: 0 });
-    }
+      const bucket = { label, receitas: 0, despesas: 0 };
 
-    for (let i = 0; i < transactions.length; i++) {
-      const tx = transactions[i];
-      if (tx.status === 'COMPLETED' && tx.date) {
-        const prefix = tx.date.slice(0, 7);
-        const bucket = buckets.get(prefix);
-        if (bucket) {
+      const monthTxs = getTransactionsForMonth(transactions, key);
+      for (let j = 0; j < monthTxs.length; j++) {
+        const tx = monthTxs[j];
+        if (tx.status === 'COMPLETED') {
           const val = convertAmount(tx.amount, tx.currency, activeCurrency);
           if (tx.type === 'INCOME') bucket.receitas += val;
           else if (tx.type === 'EXPENSE') bucket.despesas += val;
         }
       }
+
+      buckets.set(key, bucket);
     }
 
     return Array.from(buckets.values()).map((b) => ({
