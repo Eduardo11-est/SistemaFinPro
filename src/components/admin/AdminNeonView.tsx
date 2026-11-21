@@ -15,8 +15,18 @@ import {
   Wallet,
   ArrowLeftRight,
   Lock,
+  Unlock,
+  Wrench,
+  CheckCircle2,
+  Megaphone,
+  Save,
 } from 'lucide-react';
 import { NeonStatus } from '@/lib/neon';
+import {
+  MANAGEABLE_VIEWS,
+  ManageableViewId,
+  formatDefaultMaintenanceMessage,
+} from '@/lib/maintenance';
 
 interface AdminOverviewData {
   totals: {
@@ -36,11 +46,59 @@ interface AdminOverviewData {
 }
 
 export function AdminNeonView() {
-  const { currentUser } = useFinance();
+  const { currentUser, maintenanceConfig, updateMaintenanceConfig } = useFinance();
 
   const [neonStatus, setNeonStatus] = useState<NeonStatus | null>(null);
   const [overview, setOverview] = useState<AdminOverviewData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Estado local do controle de manutenção
+  const [selectedDisabledViews, setSelectedDisabledViews] = useState<ManageableViewId[]>(
+    maintenanceConfig.disabledViews
+  );
+  const [maintenanceMessage, setMaintenanceMessage] = useState(maintenanceConfig.message);
+  const [isSavingMaintenance, setIsSavingMaintenance] = useState(false);
+  const [maintenanceFeedback, setMaintenanceFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setSelectedDisabledViews(maintenanceConfig.disabledViews);
+    setMaintenanceMessage(maintenanceConfig.message);
+  }, [maintenanceConfig.disabledViews, maintenanceConfig.message]);
+
+  const toggleViewLock = (viewId: ManageableViewId) => {
+    setSelectedDisabledViews((prev) =>
+      prev.includes(viewId) ? prev.filter((id) => id !== viewId) : [...prev, viewId]
+    );
+  };
+
+  const handleSaveMaintenance = async () => {
+    setIsSavingMaintenance(true);
+    setMaintenanceFeedback(null);
+    const result = await updateMaintenanceConfig({
+      disabledViews: selectedDisabledViews,
+      message: maintenanceMessage,
+    });
+    setIsSavingMaintenance(false);
+
+    if (result.success) {
+      setMaintenanceFeedback({
+        type: 'success',
+        text:
+          selectedDisabledViews.length > 0
+            ? `Manutenção salva! ${selectedDisabledViews.length} tela(s) bloqueada(s) para usuários comuns.`
+            : 'Todas as telas foram liberadas para os usuários!',
+      });
+    } else {
+      setMaintenanceFeedback({
+        type: 'error',
+        text: result.error || 'Não foi possível salvar as configurações de manutenção.',
+      });
+    }
+    setTimeout(() => setMaintenanceFeedback(null), 4000);
+  };
 
   const fetchAdminData = useCallback(async () => {
     if (!currentUser?.id || !currentUser?.isAdmin) return;
@@ -186,6 +244,167 @@ export function AdminNeonView() {
           </div>
         </div>
       )}
+
+      {/* SEÇÃO 1.5: Controle de Manutenção & Bloqueio de Telas */}
+      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-amber-500/25 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+              <Wrench className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>Bloqueio de Telas em Manutenção</span>
+                {selectedDisabledViews.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                    {selectedDisabledViews.length} bloqueada(s)
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Selecione quais módulos ficarão temporariamente bloqueados para usuários comuns (contas ADM mantêm acesso livre)
+              </p>
+            </div>
+          </div>
+
+          {selectedDisabledViews.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedDisabledViews([])}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 text-xs font-semibold flex items-center gap-1.5 transition-colors self-start sm:self-auto"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>Liberar Todas</span>
+            </button>
+          )}
+        </div>
+
+        {/* Grade de Telas Bloqueáveis */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {MANAGEABLE_VIEWS.map((view) => {
+            const isLocked = selectedDisabledViews.includes(view.id);
+            return (
+              <button
+                key={view.id}
+                type="button"
+                onClick={() => toggleViewLock(view.id)}
+                className={`p-3.5 rounded-xl border text-left transition-all flex items-start justify-between gap-2.5 ${
+                  isLocked
+                    ? 'border-amber-500/50 bg-amber-500/10 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                      {view.label}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
+                    {view.description}
+                  </p>
+                </div>
+
+                <span
+                  className={`shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border ${
+                    isLocked
+                      ? 'bg-amber-500 text-white border-amber-600'
+                      : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
+                  }`}
+                >
+                  {isLocked ? (
+                    <>
+                      <Lock className="w-3 h-3" />
+                      <span>Bloqueada</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="w-3 h-3" />
+                      <span>Liberada</span>
+                    </>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Mensagem de Aviso para os Usuários */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Megaphone className="w-3.5 h-3.5 text-amber-500" />
+              <span>Mensagem de Aviso aos Usuários (opcional)</span>
+            </label>
+            {selectedDisabledViews.length > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setMaintenanceMessage(formatDefaultMaintenanceMessage(selectedDisabledViews))
+                }
+                className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                Gerar texto automático com as telas selecionadas
+              </button>
+            )}
+          </div>
+
+          <textarea
+            rows={3}
+            maxLength={500}
+            value={maintenanceMessage}
+            onChange={(e) => setMaintenanceMessage(e.target.value)}
+            placeholder="Ex: Estamos realizando melhorias nos módulos de Relatórios e Orçamentos. Previsão de retorno às 18h."
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+
+          {/* Prévia da Mensagem exibida aos usuários */}
+          {selectedDisabledViews.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-800 dark:text-amber-200 space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
+                Prévia do aviso que os usuários verão:
+              </span>
+              <p>
+                {maintenanceMessage.trim() ||
+                  formatDefaultMaintenanceMessage(selectedDisabledViews)}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div>
+            {maintenanceFeedback && (
+              <p
+                className={`text-xs font-medium flex items-center gap-1.5 ${
+                  maintenanceFeedback.type === 'success'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                {maintenanceFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                ) : (
+                  <AlertCircle className="w-3.5 h-3.5" />
+                )}
+                <span>{maintenanceFeedback.text}</span>
+              </p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSaveMaintenance}
+            disabled={isSavingMaintenance}
+            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-600/20 transition-all"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>
+              {isSavingMaintenance ? 'Salvando...' : 'Salvar Controle de Manutenção'}
+            </span>
+          </button>
+        </div>
+      </div>
 
       {/* SEÇÃO 2: Painel do Neon PostgreSQL Serverless */}
       <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">

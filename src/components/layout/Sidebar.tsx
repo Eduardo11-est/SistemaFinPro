@@ -11,6 +11,7 @@ import {
   BarChart3,
   Settings,
   ShieldCheck,
+  Wrench,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -19,9 +20,13 @@ interface SidebarProps {
 }
 
 export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }: SidebarProps) {
-  const { currentWorkspace, currentUser } = useFinance();
+  const { currentWorkspace, currentUser, maintenanceConfig } = useFinance();
   const isPersonal = currentWorkspace.type === 'PERSONAL';
   const isAdmin = Boolean(currentUser?.isAdmin);
+  const disabledSet = useMemo(
+    () => new Set<string>(maintenanceConfig.disabledViews),
+    [maintenanceConfig.disabledViews]
+  );
 
   const menuItems = useMemo(
     () => [
@@ -119,6 +124,7 @@ export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
+            const isUnderMaintenance = disabledSet.has(item.id);
             return (
               <button
                 key={item.id}
@@ -126,17 +132,37 @@ export const Sidebar = React.memo(function Sidebar({ activeView, setActiveView }
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
                   isActive
                     ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold border-l-2 border-emerald-500 shadow-sm'
+                    : isUnderMaintenance
+                    ? 'text-amber-600/80 dark:text-amber-400/80 hover:bg-amber-500/10'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-500' : 'opacity-70'}`} />
-                  <span>{item.label}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      isActive
+                        ? 'text-emerald-500'
+                        : isUnderMaintenance
+                        ? 'text-amber-500'
+                        : 'opacity-70'
+                    }`}
+                  />
+                  <span className="truncate">{item.label}</span>
                 </div>
-                {item.badge && (
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
-                    {item.badge}
+                {isUnderMaintenance ? (
+                  <span
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-0.5 shrink-0"
+                    title="Tela em manutenção"
+                  >
+                    <Wrench className="w-2.5 h-2.5" />
+                    <span>Manut.</span>
                   </span>
+                ) : (
+                  item.badge && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 shrink-0">
+                      {item.badge}
+                    </span>
+                  )
                 )}
               </button>
             );

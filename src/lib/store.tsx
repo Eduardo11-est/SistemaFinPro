@@ -34,6 +34,12 @@ import {
   INITIAL_GOALS,
 } from './mock-data';
 import { getTransactionsForMonth } from './recurrence';
+import {
+  DEFAULT_MAINTENANCE_CONFIG,
+  MaintenanceConfig,
+  ManageableViewId,
+  sanitizeMaintenanceConfig,
+} from './maintenance';
 
 interface FinanceContextType {
   // Auth
@@ -123,6 +129,14 @@ interface FinanceContextType {
   setActiveView: (view: string) => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+
+  // Controle de Manutenção de Telas (gerenciado por ADM)
+  maintenanceConfig: MaintenanceConfig;
+  refreshMaintenanceConfig: () => Promise<void>;
+  updateMaintenanceConfig: (payload: {
+    disabledViews: ManageableViewId[];
+    message: string;
+  }) => Promise<{ success: boolean; error?: string }>;
 
   // Computed KPIs
   stats: {
@@ -231,6 +245,47 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     type?: TransactionType;
     accountId?: string;
   } | null>(null);
+  const [maintenanceConfig, setMaintenanceConfig] = useState<MaintenanceConfig>(
+    DEFAULT_MAINTENANCE_CONFIG
+  );
+
+  const refreshMaintenanceConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/system/maintenance');
+      if (res.ok) {
+        const data = await res.json();
+        setMaintenanceConfig(sanitizeMaintenanceConfig(data));
+      }
+    } catch {}
+  }, []);
+
+  const updateMaintenanceConfig = useCallback(
+    async (payload: { disabledViews: ManageableViewId[]; message: string }) => {
+      const uid = currentUserIdRef.current;
+      try {
+        const res = await fetch('/api/admin/maintenance', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(uid ? { 'x-user-id': uid } : {}),
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { success: false, error: data.error || 'Erro ao salvar modo manutenção.' };
+        }
+        setMaintenanceConfig(sanitizeMaintenanceConfig(data));
+        return { success: true };
+      } catch (err: unknown) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : 'Erro de conexão ao salvar manutenção.',
+        };
+      }
+    },
+    []
+  );
 
   // Request deduplication refs
   const inFlightSyncRef = useRef<Promise<void> | null>(null);
@@ -360,22 +415,28 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         const userParam = `?userId=${encodeURIComponent(userId)}`;
         const headers = { 'x-user-id': userId };
 
-        const [meRes, wsRes, accRes, catRes, txRes, payRes, goalsRes, budgetsRes] = await Promise.all([
-          fetch(`/api/auth/me${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/workspaces${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/accounts${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/categories${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/transactions${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/payables${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/goals${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-          fetch(`/api/budgets${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
-        ]);
+        const [meRes, maintRes, wsRes, accRes, catRes, txRes, payRes, goalsRes, budgetsRes] =
+          await Promise.all([
+            fetch(`/api/auth/me${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch('/api/system/maintenance').then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/workspaces${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/accounts${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/categories${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/transactions${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/payables${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/goals${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+            fetch(`/api/budgets${userParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+          ]);
 
         if (meRes?.user?.id) {
           setCurrentUser(meRes.user);
           try {
             localStorage.setItem(`${STORAGE_KEY_PREFIX}active_user`, JSON.stringify(meRes.user));
           } catch {}
+        }
+
+        if (maintRes) {
+          setMaintenanceConfig(sanitizeMaintenanceConfig(maintRes));
         }
 
         let activeWsId = currentWorkspaceIdRef.current;
@@ -2072,6 +2133,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       theme,
       toggleTheme,
 
+      maintenanceConfig,
+      refreshMaintenanceConfig,
+      updateMaintenanceConfig,
+
       stats,
     }),
     [
@@ -2132,6 +2197,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       activeView,
       theme,
       toggleTheme,
+      maintenanceConfig,
+      refreshMaintenanceConfig,
+      updateMaintenanceConfig,
       stats,
     ]
   );
